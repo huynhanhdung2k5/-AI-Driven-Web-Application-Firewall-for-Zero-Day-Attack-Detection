@@ -154,11 +154,11 @@ async def log_request_to_db(client_ip: str, method: str, path: str, http_version
         attack_type = "None"
         if action == "BLOCKED":
             if analysis["engine"] == "Autoencoder":
-                attack_type = "Zero-Day Anomaly"
+                attack_type = "Zero-Day Threat"
             elif analysis["engine"] == "Random Forest":
                 attack_type = "Known Signature Threat"
             elif analysis["engine"] == "Rate Limiter":
-                attack_type = "HTTP Flood"
+                attack_type = "HTTP Flood/DoS Attempt"
 
         log_document = {
             "timestamp": datetime.now(),
@@ -224,7 +224,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
     print(f"[WAF] {method} {path_with_query} -> Phân tích bởi {analysis_result['engine']} -> An toàn: {analysis_result['is_safe']}")
     
     
-    client_ip = request.client.host if request.client else "Unknown"
+    client_ip = request.headers.get("X-Fake-IP", request.client.host if request.client else "Unknown")
     raw_version = request.scope.get("http_version", "1.1")
     http_version = f"HTTP/{raw_version}"
     # ---------------------------------------------------------
@@ -252,7 +252,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         process_time = (time.time() - start_time) * 1000
         
         # --- NÉM VIỆC GHI LOG CHO TIẾN TRÌNH CHẠY NGẦM ---
-        client_ip = request.client.host if request.client else "Unknown IP"
+        client_ip = request.headers.get("X-Fake-IP", request.client.host if request.client else "Unknown") #request.client.host if request.client else "Unknown IP"
         bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "BLOCKED", 403, process_time)
         
         html_content = f"""

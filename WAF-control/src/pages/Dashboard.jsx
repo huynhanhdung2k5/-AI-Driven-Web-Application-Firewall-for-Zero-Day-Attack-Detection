@@ -100,9 +100,17 @@ const Dashboard = () => {
         .slice(0, 5);
 
     const methodData = Object.keys(methodCounts).map(k => ({ name: k, value: methodCounts[k] }));
-    const METHOD_COLORS = ['#3498db', '#f1c40f', '#e67e22', '#e74c3c', '#9b59b6'];
+    // Gán cứng màu sắc cho từng loại Method (Đồng bộ với màu dưới bảng)
+    const METHOD_COLORS_MAP = {
+        'GET': '#2ed573',     // Xanh lá
+        'POST': '#ffa502',    // Cam
+        'PUT': '#3498db',     // Xanh dương
+        'DELETE': '#ff4757',  // Đỏ
+        'OPTIONS': '#9b59b6', // Tím
+        'Unknown': '#8c92ac'  // Xám
+    };
     const httpVersionData = Object.keys(httpVerCounts).map(k => ({ name: k, value: httpVerCounts[k] }));
-    const HTTP_COLORS = ['#9b59b6', '#3498db', '#e67e22', '#2c3e50']; // Tông màu tím giống AWS WAF
+    const HTTP_COLORS = ['#9b59b6', '#8c92ac', '#e67e22', '#2c3e50']; // Tông màu tím giống AWS WAF
     // --- LOGIC LỌC DỮ LIỆU CHO BẢNG ---
     const filteredLogs = logs.filter((log) => {
         // Lọc theo Method (Bỏ qua hoa thường để so sánh chính xác)
@@ -139,7 +147,7 @@ const Dashboard = () => {
                     <h3 className="text-[16px] text-black mb-3.75 font-semibold">Allowed vs Blocked Requests</h3>
                     <div className="flex-1 w-full relative">
                         <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
+                            <PieChart onMouseLeave={onActionPieLeave}>
                                 <Pie
                                     data={actionData}
                                     cx="50%"
@@ -310,7 +318,7 @@ const Dashboard = () => {
                 <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm h-80 flex flex-col">
                     <h3 className="text-md font-bold text-gray-800 mb-2">HTTP Methods</h3>
                     <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
+                        <PieChart onMouseLeave={onMethodPieLeave}>
                             <Pie
                                 data={methodData}
                                 cx="50%"
@@ -329,11 +337,13 @@ const Dashboard = () => {
                                     const isActive = activeMethodIndex === index;
                                     // Xác định các miếng bánh bị bỏ lại (để làm mờ)
                                     const isDimmed = activeMethodIndex !== null && !isActive;
+                                    // Lấy màu từ Map, nếu Method lạ thì cho màu xám
+                                    const cellColor = METHOD_COLORS_MAP[entry.name.toUpperCase()] || METHOD_COLORS_MAP['Unknown'];
 
                                     return (
                                         <Cell
                                             key={`cell-${index}`}
-                                            fill={METHOD_COLORS[index % METHOD_COLORS.length]}
+                                            fill={cellColor}
                                             style={{
                                                 // 1. Chuyển động lụa là trong 0.3s cho tất cả hiệu ứng
                                                 transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -360,7 +370,7 @@ const Dashboard = () => {
                     </ResponsiveContainer>
                     <div className="flex flex-wrap justify-center gap-2 mt-2">
                         {methodData.map((entry, i) => (
-                            <span key={i} className="text-[10px] font-bold" style={{ color: METHOD_COLORS[i % METHOD_COLORS.length] }}>● {entry.name}</span>
+                            <span key={i} className="text-[10px] font-bold" style={{ color: METHOD_COLORS_MAP[entry.name.toUpperCase()] || METHOD_COLORS_MAP['Unknown'] }}>● {entry.name}</span>
                         ))}
                     </div>
                 </div>
@@ -369,7 +379,7 @@ const Dashboard = () => {
                     <h3 className="text-[16px] text-black mb-3.75 font-semibold">HTTP Versions</h3>
                     <div className="flex-1 w-full relative">
                         <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
+                            <PieChart onMouseLeave={onHttpPieLeave}>
                                 <Pie
                                     data={httpVersionData}
                                     cx="50%"
@@ -499,7 +509,9 @@ const Dashboard = () => {
                                         <td className="py-3.75 px-3 border-b border-gray-100">
                                             <span className={`py-1 px-2 rounded text-xs font-bold uppercase ${log.method.toLowerCase() === 'get' ? 'bg-[#2ed573]/20 text-[#2ed573]' :
                                                 log.method.toLowerCase() === 'post' ? 'bg-[#ffa502]/20 text-[#ffa502]' :
-                                                    'bg-gray-200 text-gray-600'
+                                                    log.method.toLowerCase() === 'put' ? 'bg-[#3498db]/20 text-[#3498db]' :
+                                                        log.method.toLowerCase() === 'options' ? 'bg-[#9b59b6]/20 text-[#9b59b6]' :
+                                                            log.method.toLowerCase() === 'delete' ? 'bg-[#ff4757]/20 text-[#ff4757]' : 'bg-gray-200 text-gray-600'
                                                 }`}>
                                                 {log.method}
                                             </span>
