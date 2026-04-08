@@ -22,7 +22,7 @@ warnings.filterwarnings('ignore')
 # CẤU HÌNH RATE LIMIT (ANTI-DDOS / BRUTE-FORCE)
 # ==========================================
 RATE_LIMIT_WINDOW = 60  # Khung thời gian: 60 giây (1 phút)
-MAX_REQUESTS_PER_WINDOW = 5  # Tối đa: 50 requests / 1 phút / 1 IP
+MAX_REQUESTS_PER_WINDOW = 5  # Tối đa: 5 requests / 1 phút / 1 IP
 
 # Bộ nhớ lưu trữ lịch sử truy cập của từng IP
 # Định dạng: { "127.0.0.1": [thời_gian_1, thời_gian_2, ...] }
@@ -157,6 +157,8 @@ async def log_request_to_db(client_ip: str, method: str, path: str, http_version
                 attack_type = "Zero-Day Anomaly"
             elif analysis["engine"] == "Random Forest":
                 attack_type = "Known Signature Threat"
+            elif analysis["engine"] == "Rate Limiter":
+                attack_type = "HTTP Flood"
 
         log_document = {
             "timestamp": datetime.now(),
@@ -285,7 +287,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         )
     except httpx.ConnectError:
         process_time = (time.time() - start_time) * 1000
-        bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "ERROR", 502, process_time)
+        bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "PASSED", 502, process_time)
         return HTMLResponse(content="<h1>502 Bad Gateway</h1><p>Target Server (Port 5001) Offline.</p>", status_code = 502)
 
 
