@@ -122,7 +122,7 @@ def analyze_threat(payload: str) -> dict:
         ae_reconstruction = autoencoder.predict(ae_input, verbose=0)
         mse = np.mean(np.power(ae_input - ae_reconstruction, 2))
         if mse > AE_THRESHOLD:
-            return {"is_safe": False, "engine": "Autoencoder", "reason": f"Zero-day Anomaly (MSE: {mse:.6f})"}
+            return {"is_safe": False, "engine": "Autoencoder", "reason": f"Zero-day Anomaly"}
         return {"is_safe": True, "engine": "Autoencoder", "score": mse}
 
 # ==========================================

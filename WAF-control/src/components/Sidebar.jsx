@@ -12,7 +12,7 @@ const Sidebar = () => {
 
     return (
         <aside className="w-65 bg-white  flex flex-col h-full shrink-0">
-            <div className="flex items-center gap-2.5 p-5  text-black">
+            <div className="flex items-center gap-2.5 p-5  text-primary">
                 <Shield color="#2563eb" size={32} />
                 <h2 className="text-xl font-bold m-0">AI-WAF Control</h2>
             </div>

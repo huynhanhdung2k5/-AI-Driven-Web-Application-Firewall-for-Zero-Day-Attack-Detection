@@ -7,9 +7,7 @@ const Dashboard = () => {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    // --- STATE CHO BỘ LỌC (FILTERS) ---
-    const [methodFilter, setMethodFilter] = useState('All');
-    const [actionFilter, setActionFilter] = useState('All');
+
     // State để nhớ xem chuột đang trỏ vào miếng bánh số mấy
     // --- STATE CHO BIỂU ĐỒ 1: ALLOWED VS BLOCKED ---
     const [activeActionIndex, setActiveActionIndex] = useState(null);
@@ -111,15 +109,7 @@ const Dashboard = () => {
     };
     const httpVersionData = Object.keys(httpVerCounts).map(k => ({ name: k, value: httpVerCounts[k] }));
     const HTTP_COLORS = ['#9b59b6', '#8c92ac', '#e67e22', '#2c3e50']; // Tông màu tím giống AWS WAF
-    // --- LOGIC LỌC DỮ LIỆU CHO BẢNG ---
-    const filteredLogs = logs.filter((log) => {
-        // Lọc theo Method (Bỏ qua hoa thường để so sánh chính xác)
-        const matchMethod = methodFilter === 'All' || log.method.toUpperCase() === methodFilter;
-        // Lọc theo Action (PASSED / BLOCKED)
-        const matchAction = actionFilter === 'All' || log.action === actionFilter;
 
-        return matchMethod && matchAction; // Chỉ giữ lại log thỏa mãn cả 2 điều kiện
-    });
 
     return (
         <main className="flex-1 p-7.5 overflow-y-auto">
@@ -437,120 +427,6 @@ const Dashboard = () => {
                         </div>
                     </div>
                 </div>
-            </div>
-
-
-            {/* BẢNG DỮ LIỆU (DATA TABLE) */}
-            <div className="bg-white rounded-[10px] border border-gray-50 shadow-md p-5 mb-10">
-                {/* THANH CÔNG CỤ: TIÊU ĐỀ & DROPDOWNS */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-5 gap-4">
-                    <h2 className="text-xl font-bold text-black">Live Attack & Traffic Logs</h2>
-
-                    {/* Khu vực 2 Dropdowns */}
-                    <div className="flex items-center gap-3">
-                        <select
-                            value={methodFilter}
-                            onChange={(e) => setMethodFilter(e.target.value)}
-                            className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-primary focus:border-primary block p-2 outline-none cursor-pointer hover:bg-gray-100 transition-colors"
-                        >
-                            <option value="All">All Methods</option>
-                            <option value="GET">GET</option>
-                            <option value="POST">POST</option>
-                            <option value="PUT">PUT</option>
-                            <option value="DELETE">DELETE</option>
-                        </select>
-
-                        <select
-                            value={actionFilter}
-                            onChange={(e) => setActionFilter(e.target.value)}
-                            className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-primary focus:border-primary block p-2 outline-none cursor-pointer hover:bg-gray-100 transition-colors"
-                        >
-                            <option value="All">All Actions</option>
-                            <option value="PASSED">Allowed</option>
-                            <option value="BLOCKED">Blocked</option>
-                        </select>
-                    </div>
-                </div>
-
-                {loading ? (
-                    <p className="text-[#8c92ac] animate-pulse">Sync data...</p>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full border-collapse">
-                            <thead>
-                                <tr>
-                                    <th className="text-left p-3 text-[#8c92ac] border-b-2 border-gray-100 font-semibold">Timeline</th>
-                                    <th className="text-left p-3 text-[#8c92ac] border-b-2 border-gray-100 font-semibold">IP Client</th>
-                                    <th className="text-left p-3 text-[#8c92ac] border-b-2 border-gray-100 font-semibold">Method</th>
-                                    <th className="text-left p-3 text-[#8c92ac] border-b-2 border-gray-100 font-semibold">Path</th>
-                                    <th className="text-left p-3 text-[#8c92ac] border-b-2 border-gray-100 font-semibold">Warning Type</th>
-                                    <th className="text-left p-3 text-[#8c92ac] border-b-2 border-gray-100 font-semibold">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {/* NẾU LỌC RA KHÔNG CÓ DỮ LIỆU */}
-                                {filteredLogs.length === 0 && (
-                                    <tr>
-                                        <td colSpan="6" className="text-center py-10 text-gray-400">
-                                            No logs found matching your filters.
-                                        </td>
-                                    </tr>
-                                )}
-
-                                {/* ĐỔI THÀNH filteredLogs Ở ĐÂY */}
-                                {filteredLogs.slice(0, 15).map((log) => (
-                                    <tr key={log._id} className="hover:bg-gray-50 transition-colors">
-                                        <td className="py-3.75 px-3 border-b border-gray-100 text-gray-600 whitespace-nowrap">
-                                            {new Date(log.timestamp).toLocaleString('vi-VN')}
-                                        </td>
-                                        <td className="py-3.75 px-3 border-b border-gray-100 font-mono text-gray-600 whitespace-nowrap">
-                                            {log.client_ip}
-                                        </td>
-                                        <td className="py-3.75 px-3 border-b border-gray-100">
-                                            <span className={`py-1 px-2 rounded text-xs font-bold uppercase ${log.method.toLowerCase() === 'get' ? 'bg-[#2ed573]/20 text-[#2ed573]' :
-                                                log.method.toLowerCase() === 'post' ? 'bg-[#ffa502]/20 text-[#ffa502]' :
-                                                    log.method.toLowerCase() === 'put' ? 'bg-[#3498db]/20 text-[#3498db]' :
-                                                        log.method.toLowerCase() === 'options' ? 'bg-[#9b59b6]/20 text-[#9b59b6]' :
-                                                            log.method.toLowerCase() === 'delete' ? 'bg-[#ff4757]/20 text-[#ff4757]' : 'bg-gray-200 text-gray-600'
-                                                }`}>
-                                                {log.method}
-                                            </span>
-                                        </td>
-                                        <td className="py-3.75 px-3 border-b border-gray-100 text-gray-600">
-                                            <div className="max-w-62.5 overflow-hidden text-ellipsis whitespace-nowrap font-mono" title={log.raw_payload}>
-                                                {log.path_accessed}
-                                            </div>
-                                        </td>
-                                        <td className="py-3.75 px-3 border-b border-gray-100">
-                                            {log.attack_type === 'None' ? (
-                                                <span className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded text-xs font-bold bg-[#2ed573]/10 text-[#2ed573]  border-[#2ed573]/30">{log.reason}</span>
-                                            ) : (
-                                                <span className={`py-1 px-2.5 rounded text-xs font-bold  ${log.blocked_by_engine === 'Autoencoder'
-                                                    ? 'bg-[#ff4757]/10 text-[#ff4757] border-[#ff4757]/50'
-                                                    : 'bg-[#ff4757]/10 text-[#ff4757] border-[#ff4757]/50'
-                                                    }`}>
-                                                    {log.attack_type}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="py-3.75 px-3 border-b border-gray-100">
-                                            {log.action === 'PASSED' ? (
-                                                <span className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded text-xs font-bold bg-[#2ed573]/10 text-[#2ed573]  border-[#2ed573]/30">
-                                                    ALLOWED
-                                                </span>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded text-xs font-bold bg-[#ff4757]/10 text-[#ff4757]  border-[#ff4757]/30">
-                                                    BLOCKED
-                                                </span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-
             </div>
         </main>
     );
