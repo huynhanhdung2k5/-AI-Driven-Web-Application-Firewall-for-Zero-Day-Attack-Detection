@@ -10,44 +10,92 @@ from collections import Counter
 import pandas as pd
 import warnings
 import time 
-
+from pydantic import BaseModel
+from typing import Optional
 from collections import defaultdict
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
-
+import re
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# CẤU HÌNH RATE LIMIT (ANTI-DDOS / BRUTE-FORCE)
+# ĐỘNG CƠ WEBACL ĐỘNG (DYNAMIC DYNAMIC RULE ENGINE)
 # ==========================================
-RATE_LIMIT_WINDOW = 60  # Khung thời gian: 60 giây (1 phút)
-MAX_REQUESTS_PER_WINDOW = 5  # Tối đa: 5 requests / 1 phút / 1 IP
+# Cấu trúc mới: Lưu trữ lịch sử theo từng Luật VÀ từng IP
+# Định dạng: { rule_id: { "127.0.0.1": [ts1, ts2] } }
+dynamic_trackers = defaultdict(lambda: defaultdict(list))
+penalty_box = defaultdict(lambda: defaultdict(float))
 
-# Bộ nhớ lưu trữ lịch sử truy cập của từng IP
-# Định dạng: { "127.0.0.1": [thời_gian_1, thời_gian_2, ...] }
-ip_request_tracker = defaultdict(list)
-
-def check_rate_limit(client_ip: str) -> bool:
-    """Trả về True nếu hợp lệ, False nếu vượt quá giới hạn (Bị chặn)"""
+async def check_dynamic_webacl(request: Request, client_ip: str) -> dict:
+    """Quét request qua tất cả các luật đang ACTIVE trong MongoDB"""
     current_time = time.time()
     
-    # Lấy danh sách các mốc thời gian request của IP này
-    timestamps = ip_request_tracker[client_ip]
+    # 1. Kéo tất cả các luật đang có trạng thái enabled = True
+    active_rules = await app.mongodb["webacl_rules"].find({"enabled": True}).to_list(length=100)
     
-    # Vứt bỏ những request đã cũ (nằm ngoài khung 60 giây gần nhất)
-    valid_timestamps = [ts for ts in timestamps if current_time - ts < RATE_LIMIT_WINDOW]
-    
-    # Cập nhật lại danh sách sạch
-    ip_request_tracker[client_ip] = valid_timestamps
-    
-    # Kiểm tra số lượng
-    if len(valid_timestamps) >= MAX_REQUESTS_PER_WINDOW:
-        return False # Bị chặn!
+    for rule in active_rules:
+        rule_id = rule["rule_id"]
+        expiration_time = penalty_box[rule_id].get(client_ip,0)
+        if current_time < expiration_time :
+            return {
+                "blocked": True,
+                "rule_name": rule["name"],
+                "action": rule.get("action", "Block"),
+            }
+
+        target = rule.get("match_target", "")
+        operator = rule.get("operator", "")
+        content = rule.get("content", "")
         
-    # Nếu chưa quá giới hạn, ghi nhận thêm lần truy cập này
-    ip_request_tracker[client_ip].append(current_time)
-    return True
+        # 2. Lấy dữ liệu từ Request để đem đi so sánh
+        req_value = ""
+        if target == "URL Path":
+            req_value = request.url.path
+        elif target == "Client IP":
+            req_value = client_ip
+        elif target == "User Agent":
+            req_value = request.headers.get("user-agent", "")
+            
+        # 3. So khớp dựa trên Operator
+        is_match = False
+        if operator == "Equals" and req_value == content:
+            is_match = True
+        elif operator == "Contains" and content in req_value:
+            is_match = True
+        elif operator == "Matches Regex":
+            try:
+                if re.search(content, req_value):
+                    is_match = True
+            except:
+                pass # Bỏ qua nếu Regex gõ sai
+                
+        # 4. Nếu request khớp với điều kiện, bắt đầu đếm nhịp độ (Rate Limit)
+        if is_match:
+            duration = rule.get("duration_sec", 60) #fallback/default value
+            max_access = rule.get("access_count", 50) #fallback/default value
+            challenge_min = rule.get("challenge_min", 1)
+            
+            # Lấy lịch sử của IP này đối với riêng luật này
+            timestamps = dynamic_trackers[rule_id][client_ip]
+            # Lọc bỏ các request đã cũ ngoài khung thời gian
+            valid_timestamps = [ts for ts in timestamps if current_time - ts < duration]
+            
+            # Ghi nhận request hiện tại
+            valid_timestamps.append(current_time)
+            dynamic_trackers[rule_id][client_ip] = valid_timestamps
+            
+            # Nếu vượt ngưỡng -> CHẶN NGAY LẬP TỨC
+            if len(valid_timestamps) >= max_access:
+                penalty_box[rule_id][client_ip] = current_time + (challenge_min * 60)
+                return {
+                    "blocked": True, 
+                    "rule_name": rule["name"], 
+                    "action": rule.get("action", "Block")
+                }
+                
+    # Nếu đi qua hết các luật mà không bị sao -> An toàn
+    return {"blocked": False}
 
 app = FastAPI(title="AI-Driven WAF", description="Web Application Firewall for Zero-day Attack")
 # Mở cổng CORS cho phép Frontend ReactJS gọi API
@@ -159,6 +207,8 @@ async def log_request_to_db(client_ip: str, method: str, path: str, http_version
                 attack_type = "Known Signature Threat"
             elif analysis["engine"] == "Rate Limiter":
                 attack_type = "HTTP Flood/DoS Attempt"
+            elif analysis["engine"] == "WebACL Rules":
+                attack_type = "Violated WebACL Rules"
 
         log_document = {
             "timestamp": datetime.now(),
@@ -182,6 +232,26 @@ async def log_request_to_db(client_ip: str, method: str, path: str, http_version
     except Exception as e:
         print(f"   >>> [DB]  Log error: {e}")
 
+
+# ==========================================
+# SCHEMAS CHO WEBACL RULES (Gom chung lên đầu)
+# ==========================================
+class RuleToggle(BaseModel):
+    enabled: bool
+
+class RuleCreate(BaseModel):
+    category: str
+    name: str
+    desc: str
+    enabled: bool = True
+    match_target: str
+    operator: str
+    content: str
+    duration_sec: int
+    access_count: int
+    action: str
+    challenge_min: int
+
 # ==========================================
 # MODULE 6: API CHO DASHBOARD FRONTEND
 # ==========================================
@@ -189,7 +259,7 @@ async def log_request_to_db(client_ip: str, method: str, path: str, http_version
 async def get_traffic_logs():
     """Lấy toàn bộ lịch sử (cả xanh lẫn đỏ) để Frontend vẽ biểu đồ"""
     logs = []
-    cursor = app.mongodb["traffic_logs"].find().sort("timestamp", -1).limit(1000) # Giới hạn 1000 bản ghi mới nhất để web không bị lag
+    cursor = app.mongodb["traffic_logs"].find().sort("timestamp", -1).limit(1000)
     
     async for document in cursor:
         document["_id"] = str(document["_id"]) 
@@ -201,6 +271,82 @@ async def get_traffic_logs():
         "data": logs
     }
 
+# --- API 1: LẤY DANH SÁCH IP BỊ CHẶN (GỘP NHÓM BẰNG MONGODB AGGREGATION) ---
+@app.get("/api/waf/blocked-ips")
+async def get_blocked_ips():
+    pipeline = [
+        {"$match": {"action": {"$in": ["BLOCKED", "RATE LIMIT EXCEEDED"]}}},
+        {"$group": {
+            "_id": "$client_ip",
+            "blockedCount": {"$sum": 1},
+            "lastBlockedAt": {"$max": "$timestamp"},
+            "reason": {"$last": "$reason"},
+            "app": {"$last": "$host"},
+            "engine": {"$last": "$blocked_by_engine"},
+            "location": {"$first": "Vietnam"}
+        }},
+        {"$sort": {"lastBlockedAt": -1}},
+        {"$limit": 50}
+    ]
+    
+    cursor = app.mongodb["traffic_logs"].aggregate(pipeline)
+    blocked_list = []
+    async for doc in cursor:
+        engine_name = doc.get("engine", "AI/WAF")
+        if engine_name == "WebACL Rules":
+            display_action = "Blocked by WebACL Rules"
+        else:
+            display_action = f"Blocked by {engine_name}"
+        blocked_list.append({
+            "id": str(doc["_id"]),
+            "ip": doc["_id"],
+            "location": doc["location"],
+            "app": doc["app"],
+            "host": doc["app"],
+            "reason": doc["reason"],
+            "action": display_action,
+            "blockedCount": doc["blockedCount"],
+            "startAt": doc["lastBlockedAt"].strftime("%Y-%m-%d %H:%M:%S")
+        })
+    return {"status": "success", "data": blocked_list}
+
+
+# --- API 2: LẤY DANH SÁCH RULES (Hàm bị thiếu lúc nãy) ---
+@app.get("/api/waf/rules")
+async def get_webacl_rules():
+    cursor = app.mongodb["webacl_rules"].find({}, {"_id": 0}).sort("rule_id", 1)
+    rules = await cursor.to_list(length=100)
+    return {"status": "success", "data": rules}
+
+
+# --- API 3: TẠO RULE MỚI (Đã đổi thành POST) ---
+@app.post("/api/waf/rules")
+async def create_rule(rule: RuleCreate):
+    new_rule = rule.dict()
+    new_rule["rule_id"] = int(time.time() * 1000) 
+    
+    await app.mongodb["webacl_rules"].insert_one(new_rule)
+    return {"status": "success", "message": "Rule created successfully", "rule_id": new_rule["rule_id"]}
+
+
+# --- API 4: CẬP NHẬT TRẠNG THÁI BẬT/TẮT RULES ---
+@app.put("/api/waf/rules/{rule_id}")
+async def toggle_rule(rule_id: int, payload: RuleToggle):
+    await app.mongodb["webacl_rules"].update_one(
+        {"rule_id": rule_id}, 
+        {"$set": {"enabled": payload.enabled}}
+    )
+    return {"status": "success", "message": f"Rule {rule_id} updated to {payload.enabled}"}
+
+# --- API 5: XÓA RULES ---
+@app.delete("/api/waf/rules/{rule_id}")
+async def delete_rule(rule_id: int):
+    result = await app.mongodb["webacl_rules"].delete_one(
+        {"rule_id": rule_id}
+    )
+    if result.deleted_count == 1:
+      return {"status": "success", "message":f"Rule {rule_id} has been deleted"}
+    return {"status": "error", "message": "There is no rule to be deleted"}
 # ==========================================
 # MODULE 4: REVERSE PROXY ROUTING (ĐỊNH TUYẾN CHUYỂN TIẾP)
 # ==========================================
@@ -228,20 +374,23 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
     raw_version = request.scope.get("http_version", "1.1")
     http_version = f"HTTP/{raw_version}"
     # ---------------------------------------------------------
-    # 1. KIỂM TRA RATE LIMIT (CHỐNG DDOS/SPAM) TRƯỚC TIÊN
+    # 1. KIỂM TRA WEBACL RULES (DYNAMIC TỪ MONGODB)
     # ---------------------------------------------------------
-    if not check_rate_limit(client_ip):
-        print(f"   >>>[RATE LIMIT] Đã chặn IP {client_ip} vì gửi quá {MAX_REQUESTS_PER_WINDOW} req/{RATE_LIMIT_WINDOW}s")
+    headers_dict = dict(request.headers)
+    acl_result = await check_dynamic_webacl(request, client_ip)
+    
+    if acl_result["blocked"]:
+        rule_name = acl_result["rule_name"]
+        print(f"   >>>[WEBACL] Đã chặn IP {client_ip} do vi phạm luật: {rule_name}")
         
-        # Ghi log loại tấn công này vào DB luôn cho xịn
-        headers_dict = dict(request.headers)
-        analysis_mock = {"engine": "Rate Limiter", "reason": "HTTP Flood / DoS Attempt"}
-        process_time = (time.time() - start_time ) *1000
+        # Ghi log rõ ràng tên luật bị vi phạm vào DB
+        analysis_mock = {"engine": "WebACL Rules", "reason": f"Triggered rule: {rule_name}"}
+        process_time = (time.time() - start_time ) * 1000
         bg_tasks.add_task(log_request_to_db, client_ip, request.method, request.url.path, http_version, headers_dict, analysis_mock, "RATE LIMIT EXCEEDED", "BLOCKED", 429, process_time)
         
-        # Trả về lỗi 429 chuẩn quốc tế
+        # Tùy biến mã phản hồi theo Action cấu hình
         return HTMLResponse(
-            content="<h1>429 Too Many Requests</h1>", 
+            content=f"<h1>Blocked by AI-WAF</h1><p>You violated Security Rule: {rule_name}</p>", 
             status_code=429
         )
     headers_dict = dict(request.headers)

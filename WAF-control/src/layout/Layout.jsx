@@ -13,6 +13,8 @@ const Layout = () => {
             setHeaderData({ title: "WAF Dashboard" });
         } else if (path.startsWith('/live-traffic')) {
             setHeaderData({ title: 'WAF Traffic' });
+        } else if (path.startsWith('/asset')) {
+            setHeaderData({ title: "WAF Asset" });
         }
     }, [location.pathname]);
     return (
@@ -25,9 +27,9 @@ const Layout = () => {
 
                 {/* Outlet là nơi các trang như Dashboard chui vào */}
                 {/* overflow-y-auto ở đây giúp thanh cuộn chỉ xuất hiện ở nội dung, Navbar vẫn đứng im */}
-                <div className="flex-1 overflow-y-auto relative">
+                <main className="flex-1 overflow-y-auto relative">
                     <Outlet />
-                </div>
+                </main>
             </div>
         </div>
     );

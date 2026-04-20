@@ -33,7 +33,7 @@ const LiveTraffic = () => {
     const filteredLogs = logs.filter((log) => {
         const matchMethod = methodFilter === 'All' || log.method.toUpperCase() === methodFilter;
         const matchAction = actionFilter === 'All' || log.action === actionFilter;
-        const matchWF = WTFilter === 'All' || log.reason === WTFilter;
+        const matchWF = WTFilter === 'All' || log.reason === WTFilter || (WTFilter === 'Violated WebACL Rules' && log.reason?.startsWith('Triggered rule:'));
         return matchMethod && matchAction && matchWF;
     });
 
@@ -71,6 +71,7 @@ const LiveTraffic = () => {
                             <option value="Known Signature Detected">Known Signature Threat</option>
                             <option value="Zero-day Anomaly">Zero-day Threat</option>
                             <option value="HTTP Flood / DoS Attempt">HTTP Flood/DoS Attempt</option>
+                            <option value="Violated WebACL Rules">Violated WebACL Rules</option>
                         </select>
 
                         <select

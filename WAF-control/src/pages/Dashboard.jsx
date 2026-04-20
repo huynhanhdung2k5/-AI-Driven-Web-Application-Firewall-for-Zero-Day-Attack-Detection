@@ -62,7 +62,7 @@ const Dashboard = () => {
     const uaCounts = {};
     const httpVerCounts = {};
     const methodCounts = {};
-    const engineBlocks = { "Random Forest": 0, "Autoencoder": 0, "Rate Limiter": 0 };
+    const engineBlocks = { "Random Forest": 0, "Autoencoder": 0, "WebACL Rules": 0 };
 
 
     logs.forEach(l => {
@@ -294,8 +294,8 @@ const Dashboard = () => {
                                     <td className="py-2.5 text-right font-bold text-gray-900">{engineBlocks["Autoencoder"]}</td>
                                 </tr>
                                 <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
-                                    <td className="py-2.5 text-gray-700">Rate Limiter</td>
-                                    <td className="py-2.5 text-right font-bold text-gray-900">{engineBlocks["Rate Limiter"]}</td>
+                                    <td className="py-2.5 text-gray-700">WebACL Rules</td>
+                                    <td className="py-2.5 text-right font-bold text-gray-900">{engineBlocks["WebACL Rules"]}</td>
                                 </tr>
                             </tbody>
                         </table>

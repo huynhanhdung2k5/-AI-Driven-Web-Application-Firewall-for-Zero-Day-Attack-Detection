@@ -24,8 +24,8 @@ const Sidebar = () => {
                 <NavLink to="/live-traffic" className={navItemClass}>
                     <Activity size={20} /> Live Traffic
                 </NavLink>
-                <NavLink to="/assets" className={navItemClass}>
-                    <Server size={20} /> Assets Target
+                <NavLink to="/asset" className={navItemClass}>
+                    <Server size={20} /> Assets
                 </NavLink>
                 <NavLink to="/settings" className={navItemClass}>
                     <Settings size={20} /> Settings
