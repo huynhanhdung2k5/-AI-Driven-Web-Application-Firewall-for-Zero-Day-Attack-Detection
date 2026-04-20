@@ -270,6 +270,7 @@ const Asset = () => {
             {isModalOpen && (
                 <div className="fixed inset-0 z-[999] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm px-4">
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+
                         {/* Header Modal */}
                         <div className="flex items-center justify-between p-5 border-b border-gray-100">
                             <h2 className="text-lg font-bold text-gray-800">Add rules</h2>
@@ -329,8 +330,8 @@ const Asset = () => {
                                         />
                                     </div>
                                 </div>
+                                <div className='text-xs text-gray-500'>To apply rule to all request, change Operator to "Matches Regex" and Content to " .* "</div>
                             </div>
-
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Duration <span className="text-red-500">*</span></label>
@@ -363,7 +364,7 @@ const Asset = () => {
                             </div>
                         </div>
 
-                        {/* Footer Modal */}
+                        {/* Footer Modal ĐÃ ĐƯỢC ĐƯA RA NGOÀI BODY */}
                         <div className="flex items-center justify-end gap-3 p-5 border-t border-gray-100 bg-gray-50/50">
                             <button onClick={() => setIsModalOpen(false)} className="px-5 py-2 text-gray-500 font-bold text-sm hover:text-gray-700 transition-colors">
                                 CANCEL
