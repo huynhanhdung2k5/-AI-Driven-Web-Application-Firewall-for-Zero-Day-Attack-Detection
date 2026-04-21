@@ -36,9 +36,9 @@ const Asset = () => {
             // Tự động tạo câu Description cho đẹp dựa trên các thông số
             let desc = "";
             if (newRule.content === ".*") {
-                desc = `An IP with any content that makes ${newRule.access} requests within ${newRule.duration} seconds will require ${newRule.action} for ${newRule.challenge} minutes.`;
+                desc = `An ${newRule.matchTarget} with any content that makes ${newRule.access} requests within ${newRule.duration} seconds will require ${newRule.action} for ${newRule.challenge} minutes.`;
             } else {
-                desc = `An IP with content ${newRule.content} that makes ${newRule.access} requests within ${newRule.duration} seconds will require ${newRule.action} for ${newRule.challenge} minutes.`;
+                desc = `An ${newRule.matchTarget} with content ${newRule.content} that makes ${newRule.access} requests within ${newRule.duration} seconds will require ${newRule.action} for ${newRule.challenge} minutes.`;
             }
 
             const payload = {
@@ -268,7 +268,7 @@ const Asset = () => {
 
             {/* MODAL THÊM RULE MỚI (PHẦN BỊ THIẾU TRƯỚC ĐÓ) */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-[999] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm px-4">
+                <div className="fixed inset-0 z-999 flex items-center justify-center bg-gray-900/40 backdrop-blur-sm px-4">
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
 
                         {/* Header Modal */}
@@ -305,7 +305,7 @@ const Asset = () => {
 
                             <div className="bg-gray-50/50 border border-gray-100 rounded-lg p-4">
                                 <div className="flex flex-wrap gap-3 items-start mb-4">
-                                    <div className="flex-1 min-w-[150px]">
+                                    <div className="flex-1 min-w-37.5">
                                         <label className="block text-xs text-gray-500 mb-1">Match Target</label>
                                         <select value={newRule.matchTarget} onChange={e => setNewRule({ ...newRule, matchTarget: e.target.value })} className="w-full border border-gray-200 rounded-lg p-2 outline-none text-sm bg-white focus:border-primary">
                                             <option value="URL Path">URL Path</option>
@@ -313,7 +313,7 @@ const Asset = () => {
                                             <option value="User Agent">User Agent</option>
                                         </select>
                                     </div>
-                                    <div className="flex-1 min-w-[120px]">
+                                    <div className="flex-1 min-w-30">
                                         <label className="block text-xs text-gray-500 mb-1">Operator <span className="text-red-500">*</span></label>
                                         <select value={newRule.operator} onChange={e => setNewRule({ ...newRule, operator: e.target.value })} className="w-full border border-gray-200 rounded-lg p-2 outline-none text-sm bg-white focus:border-primary">
                                             <option value="Equals">Equals</option>
@@ -321,7 +321,7 @@ const Asset = () => {
                                             <option value="Matches Regex">Matches Regex</option>
                                         </select>
                                     </div>
-                                    <div className="flex-[2] min-w-[200px]">
+                                    <div className="flex-2 min-w-50">
                                         <label className="block text-xs text-gray-500 mb-1">Content <span className="text-red-500">*</span></label>
                                         <input
                                             type="text" placeholder="e.g. /api/login"

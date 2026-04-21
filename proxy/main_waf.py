@@ -25,24 +25,27 @@ warnings.filterwarnings('ignore')
 # Cấu trúc mới: Lưu trữ lịch sử theo từng Luật VÀ từng IP
 # Định dạng: { rule_id: { "127.0.0.1": [ts1, ts2] } }
 dynamic_trackers = defaultdict(lambda: defaultdict(list))
-penalty_box = defaultdict(lambda: defaultdict(float))
-
+penalty_box = defaultdict(float)
+attack_trackers = defaultdict(list)
 async def check_dynamic_webacl(request: Request, client_ip: str) -> dict:
     """Quét request qua tất cả các luật đang ACTIVE trong MongoDB"""
     current_time = time.time()
+    jailed_info = penalty_box.get(client_ip, {})
+    if jailed_info and current_time < jailed_info.get("expire", 0):
+        return {
+            "blocked": True,
+            "rule_name": jailed_info.get("reason", "Jailed by WAF"),
+            "action": "Block",
+        }
     
     # 1. Kéo tất cả các luật đang có trạng thái enabled = True
     active_rules = await app.mongodb["webacl_rules"].find({"enabled": True}).to_list(length=100)
-    
-    for rule in active_rules:
+    attack_rule = [r for r in active_rules if r.get("category") == "Attack Limiting"]
+    normal_rule = [r for r in active_rules if r.get("category") != "Attack Limiting"]
+    is_violating = False
+    violated_rule = None
+    for rule in normal_rule:
         rule_id = rule["rule_id"]
-        expiration_time = penalty_box[rule_id].get(client_ip,0)
-        if current_time < expiration_time :
-            return {
-                "blocked": True,
-                "rule_name": rule["name"],
-                "action": rule.get("action", "Block"),
-            }
 
         target = rule.get("match_target", "")
         operator = rule.get("operator", "")
@@ -87,13 +90,37 @@ async def check_dynamic_webacl(request: Request, client_ip: str) -> dict:
             
             # Nếu vượt ngưỡng -> CHẶN NGAY LẬP TỨC
             if len(valid_timestamps) >= max_access:
-                penalty_box[rule_id][client_ip] = current_time + (challenge_min * 60)
-                return {
-                    "blocked": True, 
-                    "rule_name": rule["name"], 
-                    "action": rule.get("action", "Block")
-                }
-                
+                is_violating = True
+                violated_rule = rule
+                break
+
+
+    if is_violating :
+        attack_trackers[client_ip].append(current_time)
+        penalty_minutes = violated_rule.get("challenge_min", 1)
+        final_rule_name = violated_rule["name"]
+        final_action = violated_rule.get("action", "Block")
+
+        for a_rule in attack_rule:
+            a_duration = a_rule.get("duration_sec", 60)
+            a_max_access = a_rule.get("access_count", 3)
+                    
+            recent_attack = [ts for ts in attack_trackers[client_ip] if current_time - ts < a_duration]
+            if len(recent_attack) >= a_max_access :
+                penalty_minutes = a_rule.get("challenge_min", 30)
+                final_rule_name = f"{a_rule["name"]} (Escalated Penalty)"
+                final_action = a_rule.get("action", "Block")
+                print(f"IP {client_ip} has been penaltied for {penalty_minutes} minutes")
+                break
+        penalty_box[client_ip] = {
+            "expire": current_time + (penalty_minutes * 60),
+            "reason": final_rule_name
+        }
+        return {
+            "blocked": True,
+            "rule_name": final_rule_name,
+            "action": final_action,
+             }
     # Nếu đi qua hết các luật mà không bị sao -> An toàn
     return {"blocked": False}
 
@@ -390,7 +417,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         
         # Tùy biến mã phản hồi theo Action cấu hình
         return HTMLResponse(
-            content=f"<h1>Blocked by AI-WAF</h1><p>You violated Security Rule: {rule_name}</p>", 
+            content=f"<h1>Blocked by AI-WAF</h1><p>You violated Security Rule {rule_name}</p>", 
             status_code=429
         )
     headers_dict = dict(request.headers)
