@@ -38,7 +38,7 @@ const Asset = () => {
             if (newRule.content === ".*") {
                 desc = `An ${newRule.matchTarget} with any content that makes ${newRule.access} requests within ${newRule.duration} seconds will require ${newRule.action} for ${newRule.challenge} minutes.`;
             } else {
-                desc = `An ${newRule.matchTarget} with content ${newRule.content} that makes ${newRule.access} requests within ${newRule.duration} seconds will require ${newRule.action} for ${newRule.challenge} minutes.`;
+                desc = `An ${newRule.matchTarget} with content "${newRule.content}" that makes ${newRule.access} requests within ${newRule.duration} seconds will require ${newRule.action} for ${newRule.challenge} minutes.`;
             }
 
             const payload = {
@@ -324,13 +324,13 @@ const Asset = () => {
                                     <div className="flex-2 min-w-50">
                                         <label className="block text-xs text-gray-500 mb-1">Content <span className="text-red-500">*</span></label>
                                         <input
-                                            type="text" placeholder="e.g. /api/login"
+                                            type="text" placeholder=""
                                             value={newRule.content} onChange={e => setNewRule({ ...newRule, content: e.target.value })}
                                             className="w-full border border-gray-200 rounded-lg p-2 outline-none text-sm bg-white focus:border-primary"
                                         />
                                     </div>
                                 </div>
-                                <div className='text-xs text-gray-500'>To apply rule to all request, change Operator to "Matches Regex" and Content to " .* "</div>
+                                <div className='text-xs text-gray-500'>For Access Limiting and Attack Limiting, to apply rule to all request, change Operator to "Matches Regex" and Content to " .* "</div>
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                                 <div>

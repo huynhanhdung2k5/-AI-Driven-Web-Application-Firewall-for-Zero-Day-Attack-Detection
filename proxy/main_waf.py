@@ -27,6 +27,7 @@ warnings.filterwarnings('ignore')
 dynamic_trackers = defaultdict(lambda: defaultdict(list))
 penalty_box = defaultdict(float)
 attack_trackers = defaultdict(list)
+error_trackers = defaultdict(lambda: defaultdict(list))
 async def check_dynamic_webacl(request: Request, client_ip: str) -> dict:
     """Quét request qua tất cả các luật đang ACTIVE trong MongoDB"""
     current_time = time.time()
@@ -94,7 +95,6 @@ async def check_dynamic_webacl(request: Request, client_ip: str) -> dict:
                 violated_rule = rule
                 break
 
-
     if is_violating :
         attack_trackers[client_ip].append(current_time)
         penalty_minutes = violated_rule.get("challenge_min", 1)
@@ -123,6 +123,43 @@ async def check_dynamic_webacl(request: Request, client_ip: str) -> dict:
              }
     # Nếu đi qua hết các luật mà không bị sao -> An toàn
     return {"blocked": False}
+
+async def check_error_limiting(client_ip: str, status_code: int):
+    """Hàm này chạy SAU KHI server đích đã trả về response"""
+    current_time = time.time()
+    
+    # 1. Kéo các luật Error Limiting đang bật
+    active_rules = await app.mongodb["webacl_rules"].find({
+        "enabled": True, 
+        "category": "Error Limiting"
+    }).to_list(length=100)
+    
+    str_status = str(status_code)
+    
+    for rule in active_rules:
+        rule_id = rule["rule_id"]
+        target_errors = rule.get("content", "") # Ví dụ: "403,404,500"
+        
+        # 2. Nếu status_code nằm trong danh sách theo dõi
+        if str_status in target_errors:
+            duration = rule.get("duration_sec", 60)
+            max_access = rule.get("access_count", 10)
+            challenge_min = rule.get("challenge_min", 30)
+            
+            timestamps = error_trackers[rule_id][client_ip]
+            valid_timestamps = [ts for ts in timestamps if current_time - ts < duration]
+            valid_timestamps.append(current_time)
+            error_trackers[rule_id][client_ip] = valid_timestamps
+            
+            # 3. NẾU VƯỢT NGƯỠNG -> TỐNG VÀO NHÀ GIAM
+            if len(valid_timestamps) >= max_access:
+                # Dùng cấu trúc dict mới của penalty_box mà bạn đã cập nhật
+                penalty_box[client_ip] = {
+                    "expire": current_time + (challenge_min * 60),
+                    "reason": rule["name"]
+                }
+                print(f" [ERROR LIMIT] IP {client_ip} has been denied for {challenge_min} minutes")
+                break
 
 app = FastAPI(title="AI-Driven WAF", description="Web Application Firewall for Zero-day Attack")
 # Mở cổng CORS cho phép Frontend ReactJS gọi API
@@ -397,7 +434,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
     print(f"[WAF] {method} {path_with_query} -> Phân tích bởi {analysis_result['engine']} -> An toàn: {analysis_result['is_safe']}")
     
     
-    client_ip = request.headers.get("X-Fake-IP", request.client.host if request.client else "Unknown")
+    client_ip = request.headers.get("x-fake-ip", request.client.host if request.client else "Unknown")
     raw_version = request.scope.get("http_version", "1.1")
     http_version = f"HTTP/{raw_version}"
     # ---------------------------------------------------------
@@ -428,7 +465,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         process_time = (time.time() - start_time) * 1000
         
         # --- NÉM VIỆC GHI LOG CHO TIẾN TRÌNH CHẠY NGẦM ---
-        client_ip = request.headers.get("X-Fake-IP", request.client.host if request.client else "Unknown") #request.client.host if request.client else "Unknown IP"
+        client_ip = request.headers.get("x-fake-ip", request.client.host if request.client else "Unknown") #request.client.host if request.client else "Unknown IP"
         bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "BLOCKED", 403, process_time)
         
         html_content = f"""
@@ -455,6 +492,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         )
         response = await client.send(req, stream=True)
         process_time = (time.time() - start_time) * 1000
+        await check_error_limiting(client_ip, response.status_code)
         bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "PASSED", response.status_code, process_time)
         return StreamingResponse(
             response.aiter_raw(),
@@ -463,6 +501,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         )
     except httpx.ConnectError:
         process_time = (time.time() - start_time) * 1000
+        await check_error_limiting(client_ip, 502)
         bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "PASSED", 502, process_time)
         return HTMLResponse(content="<h1>502 Bad Gateway</h1><p>Target Server (Port 5001) Offline.</p>", status_code = 502)
 
