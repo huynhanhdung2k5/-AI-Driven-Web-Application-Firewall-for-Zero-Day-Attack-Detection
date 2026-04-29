@@ -126,6 +126,18 @@ const Asset = () => {
         }
     };
 
+    const handleUnblockIp = async (ip) => {
+        try {
+            await axios.delete(`http://localhost:8000/api/waf/unblock/${ip}`);
+
+            setBlockedRecords(prev => prev.map(record =>
+                record.ip === ip ? { ...record, isUnblocked: true } : record));
+        } catch (error) {
+            console.error("Error while unblock ip:", error);
+            alert("Could not unblock IP")
+        }
+    };
+
     return (
         <main className="p-7.5 bg-gray-50/50 min-h-screen">
             {/* GÓC NHÌN 1: BẢNG DANH SÁCH IP BỊ CHẶN */}
@@ -191,7 +203,7 @@ const Asset = () => {
                                         <td className="px-6 py-4 font-black text-red-500">{record.blockedCount}</td>
                                         <td className="px-6 py-4 font-mono text-gray-600 text-xs whitespace-nowrap">{record.startAt}</td>
                                         <td className="px-6 py-4">
-                                            <button className="text-primary font-semibold hover:underline">Unblock</button>
+                                            <button onClick={() => !record.isUnblocked && handleUnblockIp(record.ip)} className={`font-semibold transition-colors ${record.isUnblocked ? "text-gray-400 cursor-default" : "text-primary hover:underline hover:text-blue-700"}`} >{record.isUnblocked ? "Unblocked" : "Unblock"} </button>
                                         </td>
                                     </tr>
                                 ))}

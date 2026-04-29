@@ -25,7 +25,7 @@ warnings.filterwarnings('ignore')
 # Cấu trúc mới: Lưu trữ lịch sử theo từng Luật VÀ từng IP
 # Định dạng: { rule_id: { "127.0.0.1": [ts1, ts2] } }
 dynamic_trackers = defaultdict(lambda: defaultdict(list))
-penalty_box = defaultdict(float)
+penalty_box = {}
 attack_trackers = defaultdict(list)
 error_trackers = defaultdict(lambda: defaultdict(list))
 async def check_dynamic_webacl(request: Request, client_ip: str) -> dict:
@@ -411,6 +411,18 @@ async def delete_rule(rule_id: int):
     if result.deleted_count == 1:
       return {"status": "success", "message":f"Rule {rule_id} has been deleted"}
     return {"status": "error", "message": "There is no rule to be deleted"}
+
+# --- API 6: UNBLOCK ---
+@app.delete("/api/waf/unblock/{ip}")
+async def unblock_ip(ip: str):
+    if ip in penalty_box:
+        del penalty_box[ip]
+        if ip in attack_trackers:
+            del attack_trackers[ip]
+            print(f"IP {ip} unblocked. You can continue")
+            return {"status": "success", "message": f"IP {ip} unblocked"}
+    return {"status": "error", "message": f"Failed to unblock IP {ip}"}
+
 # ==========================================
 # MODULE 4: REVERSE PROXY ROUTING (ĐỊNH TUYẾN CHUYỂN TIẾP)
 # ==========================================
@@ -419,6 +431,8 @@ client = httpx.AsyncClient(base_url=TARGET_SERVER)
 # Chú ý: Đã bổ sung biến bg_tasks: BackgroundTasks vào hàm
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
+    if path.startswith ("api/waf"):
+        return await handle_api_request(request, path)
     start_time = time.time()
     method = request.method
     path_with_query = request.url.path
@@ -435,6 +449,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
     
     
     client_ip = request.headers.get("x-fake-ip", request.client.host if request.client else "Unknown")
+    
     raw_version = request.scope.get("http_version", "1.1")
     http_version = f"HTTP/{raw_version}"
     # ---------------------------------------------------------
