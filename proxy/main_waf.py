@@ -431,8 +431,7 @@ client = httpx.AsyncClient(base_url=TARGET_SERVER)
 # Chú ý: Đã bổ sung biến bg_tasks: BackgroundTasks vào hàm
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
-    if path.startswith ("api/waf"):
-        return await handle_api_request(request, path)
+    
     start_time = time.time()
     method = request.method
     path_with_query = request.url.path
@@ -483,6 +482,8 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         client_ip = request.headers.get("x-fake-ip", request.client.host if request.client else "Unknown") #request.client.host if request.client else "Unknown IP"
         bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "BLOCKED", 403, process_time)
         
+        #Đưa cho Error Limiting đếm lỗi 403
+        await check_error_limiting(client_ip, 403)
         html_content = f"""
         <html>
             <body style="background-color: black; color: red; text-align: center; margin-top: 20%; font-family: monospace;">

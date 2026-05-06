@@ -34,13 +34,13 @@ const Asset = () => {
 
         try {
             // Tự động tạo câu Description cho đẹp dựa trên các thông số
-            let desc = "";
-            if (newRule.content === ".*") {
-                desc = `An ${newRule.matchTarget} with any content that makes ${newRule.access} requests within ${newRule.duration} seconds will require ${newRule.action} for ${newRule.challenge} minutes.`;
-            } else {
-                desc = `An ${newRule.matchTarget} with content "${newRule.content}" that makes ${newRule.access} requests within ${newRule.duration} seconds will require ${newRule.action} for ${newRule.challenge} minutes.`;
+            const contentText = newRule.content === ".*" ? "any content" : `content ${newRule.content}`;
+            const descTemplate = {
+                'Error Limiting': `An IP that triggers ${newRule.content} errors within ${newRule.duration} seconds will be blocked for ${newRule.challenge} minutes `,
+                'Attack Limiting': `An IP that triggers attack blocking ${newRule.access} times within ${newRule.duration} seconds will be blocked for ${newRule.challenge} minutes `,
+                'Access Limiting': `An ${newRule.matchTarget} with ${contentText} that makes ${newRule.access} request within ${newRule.duration} seconds will be blocked for ${newRule.challenge} minutes `,
             }
-
+            let desc = descTemplate[newRule.category] || descTemplate['Access Limiting']
             const payload = {
                 category: newRule.category,
                 name: newRule.name,
