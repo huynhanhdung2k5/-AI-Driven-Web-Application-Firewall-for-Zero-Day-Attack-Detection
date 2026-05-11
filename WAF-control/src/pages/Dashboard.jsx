@@ -24,8 +24,36 @@ const Dashboard = () => {
 
     useEffect(() => {
         fetchLogs();
-        const interval = setInterval(fetchLogs, 5000);
-        return () => clearInterval(interval);
+        let isMounted = true;
+        let ws = null;
+        const timeoutID = setTimeout(() => {
+            if (!isMounted) return;
+            ws = new WebSocket('ws://localhost:8000/ws/waf');
+            ws.onopen = () => {
+                console.log('Websocket is connected to Dashboard');
+            }
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    //Có log mới => cập nhật
+                    if (data.type == "NEW_LOG" || data.type == "NEW_BLOCK") {
+                        fetchLogs();
+                    }
+                } catch (err) {
+                    console.error("Error while fetching data:", err);
+                }
+            }
+            ws.onerror = (error) => {
+                console.error("Websocket error:", error);
+            }
+        }, 100);
+        return () => {
+            isMounted = false;
+            clearTimeout(timeoutID);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+        }
     }, []);
 
     const fetchLogs = async () => {

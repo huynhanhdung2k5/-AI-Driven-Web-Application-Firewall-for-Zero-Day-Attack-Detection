@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, Request, BackgroundTasks, WebSocket, WebSocketDisconnect 
+from fastapi.responses import HTMLResponse, StreamingResponse, Response
 import uvicorn
 import httpx
 import joblib
@@ -10,6 +10,7 @@ from collections import Counter
 import pandas as pd
 import warnings
 import time 
+import asyncio
 from pydantic import BaseModel
 from typing import Optional
 from collections import defaultdict
@@ -116,6 +117,7 @@ async def check_dynamic_webacl(request: Request, client_ip: str) -> dict:
             "expire": current_time + (penalty_minutes * 60),
             "reason": final_rule_name
         }
+        await ws_manager.broadcast({"type": "NEW_BLOCK", "ip": client_ip})
         return {
             "blocked": True,
             "rule_name": final_rule_name,
@@ -158,10 +160,63 @@ async def check_error_limiting(client_ip: str, status_code: int):
                     "expire": current_time + (challenge_min * 60),
                     "reason": rule["name"]
                 }
+                await ws_manager.broadcast({"type": "NEW_BLOCK", "ip": client_ip})
                 print(f" [ERROR LIMIT] IP {client_ip} has been denied for {challenge_min} minutes")
                 break
 
 app = FastAPI(title="AI-Driven WAF", description="Web Application Firewall for Zero-day Attack")
+# WebSocket Manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+    
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+    
+    async def broadcast(self, message: dict):
+        """ Send message to all active Dashboard """
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                pass
+
+ws_manager = ConnectionManager()
+
+#Tự động dọn IP hết thời hạn penalty
+async def penalty_box_sweeper():
+    while True:
+        await  asyncio.sleep(5)
+        current_time = time.time()
+        expired_ips = []
+
+        #Quét tìm các IP đẫ hết hạn phạt
+        #Dùng list() để tạo bản sao, tránh lỗi khi đang lặp mà Dict bị thay đổi
+        for ip, info in list(penalty_box.items()):
+            if current_time >= info.get("expire",0):
+                expired_ips.append(ip)
+        
+        #Xóa IP và gửi thông báo real-time
+        for ip in expired_ips:
+            del penalty_box[ip]
+            if ip in attack_trackers:
+                del attack_trackers[ip]
+            
+            await ws_manager.broadcast({"type":"UNBLOCKED","ip":ip})
+            print(f"[WS] IP {ip} penalty time is over.")
+
+@app.websocket("/ws/waf")
+async def websocket_endpoint(websocket: WebSocket):
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
 # Mở cổng CORS cho phép Frontend ReactJS gọi API
 app.add_middleware(
     CORSMiddleware,
@@ -248,6 +303,7 @@ async def startup_db_client():
         app.mongodb_client = AsyncIOMotorClient(MONGO_URL)
         app.mongodb = app.mongodb_client.waf_db
         print("[*]  Connect successfully to MongoDB!")
+        asyncio.create_task(penalty_box_sweeper())
     except Exception as e:
         print(f"[*]  MongoDB connection error: {e}")
 
@@ -292,6 +348,8 @@ async def log_request_to_db(client_ip: str, method: str, path: str, http_version
         }
         # Lưu vào Collection mới tên là 'traffic_logs'
         await app.mongodb["traffic_logs"].insert_one(log_document)
+        #Cập nhật cho LiveTraffic
+        await ws_manager.broadcast({"type": "NEW_LOG"})
         print(f"   >>> [DB]  Log recorded ({action}) IP {client_ip} to MongoDB!")
     except Exception as e:
         print(f"   >>> [DB]  Log error: {e}")
@@ -354,6 +412,7 @@ async def get_blocked_ips():
     ]
     
     cursor = app.mongodb["traffic_logs"].aggregate(pipeline)
+    current_time = time.time()
     blocked_list = []
     async for doc in cursor:
         engine_name = doc.get("engine", "AI/WAF")
@@ -361,6 +420,14 @@ async def get_blocked_ips():
             display_action = "Blocked by WebACL Rules"
         else:
             display_action = f"Blocked by {engine_name}"
+        
+        client_ip = doc["_id"]
+
+        is_currently_blocked = False
+        jailed_info = penalty_box.get(client_ip)
+        if jailed_info and current_time < jailed_info.get("expire", 0):
+            is_currently_blocked = True
+
         blocked_list.append({
             "id": str(doc["_id"]),
             "ip": doc["_id"],
@@ -370,7 +437,8 @@ async def get_blocked_ips():
             "reason": doc["reason"],
             "action": display_action,
             "blockedCount": doc["blockedCount"],
-            "startAt": doc["lastBlockedAt"].strftime("%Y-%m-%d %H:%M:%S")
+            "startAt": doc["lastBlockedAt"].strftime("%Y-%m-%d %H:%M:%S"),
+            "is_currently_blocked": is_currently_blocked,
         })
     return {"status": "success", "data": blocked_list}
 
@@ -419,8 +487,10 @@ async def unblock_ip(ip: str):
         del penalty_box[ip]
         if ip in attack_trackers:
             del attack_trackers[ip]
-            print(f"IP {ip} unblocked. You can continue")
-            return {"status": "success", "message": f"IP {ip} unblocked"}
+
+        await ws_manager.broadcast({"type": "UNBLOCKED", "ip": ip})
+        print(f"IP {ip} unblocked. You can continue")
+        return {"status": "success", "message": f"IP {ip} unblocked"}
     return {"status": "error", "message": f"Failed to unblock IP {ip}"}
 
 # ==========================================
@@ -431,6 +501,8 @@ client = httpx.AsyncClient(base_url=TARGET_SERVER)
 # Chú ý: Đã bổ sung biến bg_tasks: BackgroundTasks vào hàm
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
+    if path == "favicon.ico" or request.url.path == "/favicon.ico":
+        return Response(status_code = 204)
     
     start_time = time.time()
     method = request.method
@@ -484,6 +556,9 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         
         #Đưa cho Error Limiting đếm lỗi 403
         await check_error_limiting(client_ip, 403)
+
+        #Cập nhật real-time
+        await ws_manager.broadcast({"type":"NEW_BLOCK", "ip": client_ip})
         html_content = f"""
         <html>
             <body style="background-color: black; color: red; text-align: center; margin-top: 20%; font-family: monospace;">

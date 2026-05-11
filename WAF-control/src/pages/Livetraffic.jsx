@@ -14,8 +14,40 @@ const LiveTraffic = () => {
     // Tự động fetch data mỗi 5 giây
     useEffect(() => {
         fetchLogs();
-        const interval = setInterval(fetchLogs, 5000);
-        return () => clearInterval(interval);
+        // Khai báo biến isMounted để tránh memory leak
+        let isMounted = true;
+        let ws = null
+
+        const timeoutID = setTimeout(() => {
+            if (!isMounted) return;
+            ws = new WebSocket('ws://localhost:8000/ws/waf');
+            ws.onopen = () => {
+                console.log('Websocket is connected to LiveTraffic');
+            };
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    //Có log mới => cập nhật bảng
+                    if (data.type === "NEW_LOG" || data.type === "NEW_BLOCK") {
+                        fetchLogs();
+                    }
+                } catch (err) {
+                    console.error("Error while fetching data:", err);
+                }
+            };
+            ws.onerror = (error) => {
+                console.error("WebSocket error:", error);
+            };
+        }, 100);
+        return () => {
+            //khai báo về false để tránh memory leak
+            isMounted = false;
+            clearTimeout(timeoutID);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+        }
     }, []);
 
     const fetchLogs = async () => {

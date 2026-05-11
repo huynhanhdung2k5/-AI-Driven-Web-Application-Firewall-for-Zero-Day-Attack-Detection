@@ -87,10 +87,49 @@ const Asset = () => {
     useEffect(() => {
         fetchBlockedIps();
         fetchRules();
+        let isMounted = true;
+        let ws = null;
+        //khởi tạo kết nối WebSocket tới FastAPI
+        const timeoutID = setTimeout(() => {
+            if (!isMounted) return;
+            ws = new WebSocket('ws://localhost:8000/ws/waf');
+            // Bổ sung log để dễ theo dõi trạng thái
+            ws.onopen = () => {
+                console.log("WebSocket is connected to Asset!");
+            };
+            //Lắng nghe tin từ server gửi về
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'UNBLOCKED') {
+                        setBlockedRecords(prev => prev.map(record =>
+                            record.ip === data.ip ? { ...record, is_currently_blocked: false } : record));
+                    } else if (data.type === 'NEW_BLOCK') {
+                        fetchBlockedIps(true);
+                    }
+                } catch (err) {
+                    console.error("Error while fetching data", err);
+                }
+            };
+            ws.onerror = (error) => {
+                console.error("WebSocket error", error);
+            };
+        }, 100);
+        return () => {
+            isMounted = false;
+            clearTimeout(timeoutID);
+            // Chỉ đóng nếu kết nối thực sự đang mở (readyState === 1)
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+        };
     }, []);
 
-    const fetchBlockedIps = async () => {
-        setLoading(true);
+    const fetchBlockedIps = async (isBackground = false) => {
+        if (!isBackground) {
+            setLoading(true);
+        }
         try {
             const res = await axios.get('http://localhost:8000/api/waf/blocked-ips');
             setBlockedRecords(res.data.data);
@@ -203,7 +242,11 @@ const Asset = () => {
                                         <td className="px-6 py-4 font-black text-red-500">{record.blockedCount}</td>
                                         <td className="px-6 py-4 font-mono text-gray-600 text-xs whitespace-nowrap">{record.startAt}</td>
                                         <td className="px-6 py-4">
-                                            <button onClick={() => !record.isUnblocked && handleUnblockIp(record.ip)} className={`font-semibold transition-colors ${record.isUnblocked ? "text-gray-400 cursor-default" : "text-primary hover:underline hover:text-blue-700"}`} >{record.isUnblocked ? "Unblocked" : "Unblock"} </button>
+                                            {record.is_currently_blocked ? (
+                                                <button onClick={() => handleUnblockIp(record.ip)} className='font-semibold text-primary hover:underline hover:text-blue-700 transition-colors'>Unblock</button>
+                                            ) : (
+                                                <span className='font-semibold text-gray-400 cursor-not-allowed'>Unblocked</span>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
