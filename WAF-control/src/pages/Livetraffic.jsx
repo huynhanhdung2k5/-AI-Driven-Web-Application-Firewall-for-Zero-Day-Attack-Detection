@@ -11,12 +11,20 @@ const LiveTraffic = () => {
     const [actionFilter, setActionFilter] = useState('All');
     const [WTFilter, setWTFilter] = useState('All');
 
-    // Tự động fetch data mỗi 5 giây
+    // STATE cho Pagination
+    const [totalRequest, setTotalRequest] = useState(0);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(1000);
+    const [jumpPage, setJumpPage] = useState('');
+    const totalPages = Math.ceil(totalRequest / pageSize);
+
+
     useEffect(() => {
         fetchLogs();
         // Khai báo biến isMounted để tránh memory leak
         let isMounted = true;
-        let ws = null
+        let ws = null;
+        let lastFetchTime = 0;
 
         const timeoutID = setTimeout(() => {
             if (!isMounted) return;
@@ -30,7 +38,12 @@ const LiveTraffic = () => {
 
                     //Có log mới => cập nhật bảng
                     if (data.type === "NEW_LOG" || data.type === "NEW_BLOCK") {
-                        fetchLogs();
+                        const currentTime = Date.now();
+                        // Chỉ cho phép gọi API nếu request cách lần gọi trước đó trên 1000ms (1 giây)
+                        if (currentPage === 1 && (currentTime - lastFetchTime > 1000)) {
+                            fetchLogs(); // Gọi hàm cập nhật dữ liệu của bạn
+                            lastFetchTime = currentTime; // Cập nhật lại mốc thời gian
+                        }
                     }
                 } catch (err) {
                     console.error("Error while fetching data:", err);
@@ -48,17 +61,34 @@ const LiveTraffic = () => {
                 ws.close();
             }
         }
-    }, []);
+    }, [currentPage, pageSize, methodFilter, actionFilter, WTFilter]);
 
     const fetchLogs = async () => {
         try {
-            const response = await axios.get('http://localhost:8000/api/logs');
+            const response = await axios.get(`http://localhost:8000/api/logs?page=${currentPage}&limit=${pageSize}&method=${methodFilter}&action=${actionFilter}&type_filter=${WTFilter}`);
             setLogs(response.data.data);
+            setTotalRequest(response.data.total_requests);
             setLoading(false);
         } catch (error) {
             console.error("Lỗi khi tải dữ liệu:", error);
             setLoading(false);
         }
+    };
+
+    const getPageNumbers = () => {
+        const pages = [];
+        if (totalPages <= 7) {
+            for (let i = 1; i <= totalPages; i++) pages.push(i);
+        } else {
+            if (currentPage <= 4) {
+                pages.push(1, 2, 3, 4, 5, '...', totalPages);
+            } else if (currentPage >= totalPages - 3) {
+                pages.push(1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+            } else {
+                pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages);
+            }
+        }
+        return pages;
     };
 
     // --- LOGIC LỌC DỮ LIỆU CHO BẢNG ---
@@ -77,14 +107,17 @@ const LiveTraffic = () => {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                     <div>
                         <h2 className="text-xl font-bold text-gray-800">Live Attack & Traffic Logs</h2>
-                        <p className="text-sm text-gray-400 mt-1">Showing {filteredLogs.length} request(s)</p>
+                        <p className="text-sm text-gray-400 mt-1">Showing {logs.length} request(s)</p>
                     </div>
 
                     {/* Khu vực 2 Dropdowns */}
                     <div className="flex items-center gap-3">
                         <select
                             value={methodFilter}
-                            onChange={(e) => setMethodFilter(e.target.value)}
+                            onChange={(e) => {
+                                setMethodFilter(e.target.value);
+                                setCurrentPage(1);
+                            }}
                             className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-primary focus:border-primary block p-2 outline-none cursor-pointer hover:bg-gray-100 transition-colors"
                         >
                             <option value="All">All Methods</option>
@@ -95,20 +128,26 @@ const LiveTraffic = () => {
                         </select>
                         <select
                             value={WTFilter}
-                            onChange={(e) => setWTFilter(e.target.value)}
+                            onChange={(e) => {
+                                setWTFilter(e.target.value);
+                                setCurrentPage(1);
+                            }}
                             className='"bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-primary focus:border-primary block p-2 outline-none cursor-pointer hover:bg-gray-100 transition-colors'
                         >
                             <option value="All">All Type</option>
                             <option value="Safe Traffic">Safe Traffic</option>
                             <option value="Known Signature Detected">Known Signature Threat</option>
-                            <option value="Zero-day Anomaly">Zero-day Threat</option>
+                            <option value="Zero-day Anomaly">Zero-Day Threat</option>
                             <option value="HTTP Flood / DoS Attempt">HTTP Flood/DoS Attempt</option>
                             <option value="Violated WebACL Rules">Violated WebACL Rules</option>
                         </select>
 
                         <select
                             value={actionFilter}
-                            onChange={(e) => setActionFilter(e.target.value)}
+                            onChange={(e) => {
+                                setActionFilter(e.target.value);
+                                setCurrentPage(1);
+                            }}
                             className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-primary focus:border-primary block p-2 outline-none cursor-pointer hover:bg-gray-100 transition-colors"
                         >
                             <option value="All">All Actions</option>
@@ -137,7 +176,7 @@ const LiveTraffic = () => {
                             </thead>
                             <tbody>
                                 {/* NẾU LỌC RA KHÔNG CÓ DỮ LIỆU */}
-                                {filteredLogs.length === 0 && (
+                                {logs.length === 0 && (
                                     <tr>
                                         <td colSpan="6" className="text-center py-12 text-gray-400">
                                             No logs found matching your filters.
@@ -146,7 +185,7 @@ const LiveTraffic = () => {
                                 )}
 
                                 {/* Đã bỏ .slice(0,15) để hiện full bảng */}
-                                {filteredLogs.map((log) => (
+                                {logs.map((log) => (
                                     <tr key={log._id} className="hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
                                         <td className="py-4 px-4 text-gray-600 whitespace-nowrap">
                                             {new Date(log.timestamp).toLocaleString('vi-VN')}
@@ -200,6 +239,88 @@ const LiveTraffic = () => {
                         </table>
                     </div>
                 )}
+                {!loading && (
+                    <div className="flex flex-wrap items-center justify-between mt-6 pt-4 border-t border-gray-100 text-[14px] text-gray-500">
+                        {/* Khu vực trái: Dropdown & Tổng số */}
+                        <div className="flex items-center gap-3">
+                            <select
+                                className="border border-gray-200 rounded text-gray-600 px-2 py-1 focus:outline-none focus:border-blue-400 cursor-pointer"
+                                value={pageSize}
+                                onChange={(e) => {
+                                    setPageSize(Number(e.target.value));
+                                    setCurrentPage(1); // Reset về trang 1 khi đổi limit
+                                }}
+                            >
+                                <option value={20}>20 / page</option>
+                                <option value={100}>100 / page</option>
+                                <option value={500}>500 / page</option>
+                                <option value={1000}>1000 / page</option>
+                            </select>
+                            <span>total {totalRequest}</span>
+                        </div>
+
+                        {/* Khu vực phải: Chuyển trang & Nhập số */}
+                        <div className="flex items-center gap-2">
+                            {/* Nút Prev */}
+                            <button
+                                disabled={currentPage === 1}
+                                onClick={() => setCurrentPage(prev => prev - 1)}
+                                className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                                &lt;
+                            </button>
+
+                            {/* Render danh sách số trang */}
+                            {getPageNumbers().map((page, index) => (
+                                <button
+                                    key={index}
+                                    disabled={page === '...'}
+                                    onClick={() => typeof page === 'number' && setCurrentPage(page)}
+                                    className={`min-w-8 h-8 px-1 rounded flex items-center justify-center font-medium transition-colors
+                                        ${page === currentPage
+                                            ? 'bg-primary text-white border border-primary' // Màu xanh giống ảnh
+                                            : page === '...'
+                                                ? 'text-gray-400 cursor-default'
+                                                : 'text-gray-600 hover:text-primary border border-transparent'}`}
+                                >
+                                    {page}
+                                </button>
+                            ))}
+
+                            {/* Nút Next */}
+                            <button
+                                disabled={currentPage === totalPages || totalPages === 0}
+                                onClick={() => setCurrentPage(prev => prev + 1)}
+                                className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                                &gt;
+                            </button>
+
+                            {/* Khung Jump to Page */}
+                            <div className="flex items-center gap-2 ml-4">
+                                <span>go to</span>
+                                <input
+                                    type="number"
+                                    className="w-14 h-8 border border-gray-200 rounded px-2 text-center focus:outline-none focus:border-blue-400"
+                                    value={jumpPage}
+                                    onChange={(e) => setJumpPage(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            const p = Number(jumpPage);
+                                            if (p >= 1 && p <= totalPages) {
+                                                setCurrentPage(p);
+                                                setJumpPage('');
+                                            }
+                                        }
+                                    }}
+                                />
+                                <span>/ {totalPages}</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {/* HẾT PHẦN THANH PHÂN TRANG */}
+
             </div>
         </main>
     );

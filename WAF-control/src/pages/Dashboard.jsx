@@ -21,11 +21,25 @@ const Dashboard = () => {
     const onHttpPieEnter = (_, index) => setActiveHttpIndex(index);
     const onHttpPieLeave = () => setActiveHttpIndex(null);
 
+    const [stats, setStats] = useState({
+        total_request: 0,
+        passed_count: 0,
+        blocked_count: 0,
+        top_ips: [],
+        top_hosts: [],
+        top_ua: [],
+        methods: [],
+        http_versions: [],
+        engines: {},
+    });
+
+
 
     useEffect(() => {
         fetchLogs();
         let isMounted = true;
         let ws = null;
+        let lastFetchTime = 0;
         const timeoutID = setTimeout(() => {
             if (!isMounted) return;
             ws = new WebSocket('ws://localhost:8000/ws/waf');
@@ -37,7 +51,11 @@ const Dashboard = () => {
                     const data = JSON.parse(event.data);
                     //Có log mới => cập nhật
                     if (data.type == "NEW_LOG" || data.type == "NEW_BLOCK") {
-                        fetchLogs();
+                        const currentTime = Date.now();
+                        if (currentTime - lastFetchTime > 2000) {
+                            fetchLogs(); // Gọi hàm cập nhật dữ liệu của bạn
+                            lastFetchTime = currentTime; // Cập nhật lại mốc thời gian
+                        }
                     }
                 } catch (err) {
                     console.error("Error while fetching data:", err);
@@ -58,8 +76,8 @@ const Dashboard = () => {
 
     const fetchLogs = async () => {
         try {
-            const response = await axios.get('http://localhost:8000/api/logs');
-            setLogs(response.data.data);
+            const response = await axios.get('http://localhost:8000/api/dashboard');
+            setStats(response.data.data);
             setLoading(false);
         } catch (error) {
             console.error("Lỗi khi tải dữ liệu:", error);
@@ -67,65 +85,18 @@ const Dashboard = () => {
         }
     };
 
-    const passedCount = logs.filter(l => l.action === 'PASSED').length;
-    const blockedCount = logs.filter(l => l.action === 'BLOCKED').length;
-
     const actionData = [
-        { name: 'Allowed Requests', value: passedCount },
-        { name: 'Blocked Requests', value: blockedCount }
+        { name: 'Allowed Requests', value: stats.passed_count },
+        { name: 'Blocked Requests', value: stats.blocked_count }
     ];
     const COLORS = ['#2ed573', '#ff4757'];
 
-    const ipCounts = {};
-    logs.forEach(l => {
-        ipCounts[l.client_ip] = (ipCounts[l.client_ip] || 0) + 1;
-    });
-    const topIpsData = Object.keys(ipCounts)
-        .map(ip => ({ ip, count: ipCounts[ip] }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5);
+    const topIpsData = stats.top_ips;
+    const topHostsData = stats.top_hosts;
+    const topUaData = stats.top_ua;
+    const methodData = stats.methods;
+    const httpVersionData = stats.http_versions;
 
-    // --- 2. DATA MỚI CHO TOP HOST, USER-AGENT & HTTP VERSION ---
-    const hostCounts = {};
-    const uaCounts = {};
-    const httpVerCounts = {};
-    const methodCounts = {};
-    const engineBlocks = { "Random Forest": 0, "Autoencoder": 0, "WebACL Rules": 0 };
-
-
-    logs.forEach(l => {
-        // Đếm Method
-        const m = l.method || 'Unknown';
-        methodCounts[m] = (methodCounts[m] || 0) + 1;
-
-        // Đếm Engine chặn
-        if (l.action === 'BLOCKED' || l.action === 'RATE LIMIT EXCEEDED') {
-            const engine = l.blocked_by_engine || 'None';
-            if (engineBlocks.hasOwnProperty(engine)) {
-                engineBlocks[engine]++;
-            }
-        }
-        const host = l.host || 'Unknown';
-        const ua = l.user_agent || 'Unknown';
-        // Hỗ trợ cả trường hợp bạn đặt tên biến là http_version hoặc http_versions
-        const httpVer = l.http_versions || 'Unknown';
-
-        hostCounts[host] = (hostCounts[host] || 0) + 1;
-        uaCounts[ua] = (uaCounts[ua] || 0) + 1;
-        httpVerCounts[httpVer] = (httpVerCounts[httpVer] || 0) + 1;
-    });
-
-    const topHostsData = Object.keys(hostCounts)
-        .map(k => ({ name: k, count: hostCounts[k] }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5);
-
-    const topUaData = Object.keys(uaCounts)
-        .map(k => ({ name: k, count: uaCounts[k] }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5);
-
-    const methodData = Object.keys(methodCounts).map(k => ({ name: k, value: methodCounts[k] }));
     // Gán cứng màu sắc cho từng loại Method (Đồng bộ với màu dưới bảng)
     const METHOD_COLORS_MAP = {
         'GET': '#2ed573',     // Xanh lá
@@ -135,7 +106,7 @@ const Dashboard = () => {
         'OPTIONS': '#9b59b6', // Tím
         'Unknown': '#8c92ac'  // Xám
     };
-    const httpVersionData = Object.keys(httpVerCounts).map(k => ({ name: k, value: httpVerCounts[k] }));
+
     const HTTP_COLORS = ['#9b59b6', '#8c92ac', '#e67e22', '#2c3e50']; // Tông màu tím giống AWS WAF
 
 
@@ -147,15 +118,15 @@ const Dashboard = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-7.5">
                 <div className="bg-white p-5 rounded-[10px] border border-gray-50 shadow-md">
                     <h3 className="text-[14px] text-[#8c92ac] mb-2.5 uppercase font-semibold">Number of Requests</h3>
-                    <p className="text-[32px] font-bold text-black">{logs.length}</p>
+                    <p className="text-[32px] font-bold text-black">{stats.total_requests}</p>
                 </div>
                 <div className="bg-white p-5 rounded-[10px] border border-gray-50 shadow-md">
                     <h3 className="text-[14px] text-[#8c92ac] mb-2.5 uppercase font-semibold">Number of Blocked Requests </h3>
-                    <p className="text-[32px] font-bold text-black">{blockedCount}</p>
+                    <p className="text-[32px] font-bold text-black">{stats.blocked_count}</p>
                 </div>
                 <div className="bg-white p-5 rounded-[10px] border border-gray-50 shadow-md">
                     <h3 className="text-[14px] text-[#8c92ac] mb-2.5 uppercase font-semibold">Number of Allowed Requests  </h3>
-                    <p className="text-[32px] font-bold text-black">{passedCount}</p>
+                    <p className="text-[32px] font-bold text-black">{stats.passed_count}</p>
                 </div>
             </div>
 
@@ -315,15 +286,15 @@ const Dashboard = () => {
                             <tbody>
                                 <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
                                     <td className="py-2.5 text-gray-700">Random Forest</td>
-                                    <td className="py-2.5 text-right font-bold text-gray-900">{engineBlocks["Random Forest"]}</td>
+                                    <td className="py-2.5 text-right font-bold text-gray-900">{stats.engines["Random Forest"] || 0}</td>
                                 </tr>
                                 <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
                                     <td className="py-2.5 text-gray-700">Autoencoder</td>
-                                    <td className="py-2.5 text-right font-bold text-gray-900">{engineBlocks["Autoencoder"]}</td>
+                                    <td className="py-2.5 text-right font-bold text-gray-900">{stats.engines["Autoencoder"] || 0}</td>
                                 </tr>
                                 <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
                                     <td className="py-2.5 text-gray-700">WebACL Rules</td>
-                                    <td className="py-2.5 text-right font-bold text-gray-900">{engineBlocks["WebACL Rules"]}</td>
+                                    <td className="py-2.5 text-right font-bold text-gray-900">{stats.engines["WebACL Rules"] || 0}</td>
                                 </tr>
                             </tbody>
                         </table>

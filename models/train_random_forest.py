@@ -9,7 +9,7 @@ import time
 
 # 1. Tải dữ liệu và Bộ từ vựng (Vectorizer) đã lưu
 print("[*] Đang tải dữ liệu và TF-IDF...")
-df = pd.read_csv("../data/csic_database_cleaned.csv")
+df = pd.read_csv("../data/super_waf_dataset.csv")
 df['Full_Payload'] = df['Full_Payload'].fillna('')
 y_true = df['Target'] 
 
@@ -55,7 +55,7 @@ print("\n[*] Đang vẽ Ma trận nhầm lẫn chuyên nghiệp cho báo cáo...
 # sklearn's classification_report sorts labels, assuming [attack_label, normal_label]
 # typically map attack=1, normal=0 or similar binary. Standard assumes 0=Normal, 1=Attack.
 # Looking at classification_report output names provided previously: ['Attack', 'Normal']
-class_names = ["Tấn công (-1)", "Bình thường (1)"] 
+class_names = ["Attack (1)", "Normal (0)"] 
 
 plt.figure(figsize=(8, 6))
 
@@ -65,9 +65,9 @@ sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
             yticklabels=class_names,
             annot_kws={"size": 14}) # Phóng to font chữ số liệu
 
-plt.title('Ma trận nhầm lẫn (Confusion Matrix) - WAF Random Forest', fontsize=16, pad=20)
-plt.ylabel('Thực tế (True Label)', fontsize=12)
-plt.xlabel('Dự đoán (Predicted Label)', fontsize=12)
+plt.title('Confusion Matrix - WAF Random Forest', fontsize=16, pad=20)
+plt.ylabel('True Label', fontsize=12)
+plt.xlabel('Predicted Label', fontsize=12)
 
 # Căn chỉnh lề tự động cho đẹp
 plt.tight_layout()
@@ -87,7 +87,7 @@ feature_importance_df = feature_importance_df.sort_values(by='Importance', ascen
 
 plt.figure(figsize=(10, 8))
 sns.barplot(x='Importance', y='Feature', data=feature_importance_df, palette='Reds_r')
-plt.title('Top 20 Từ khóa/Đặc trưng quyết định Mã Độc (Random Forest WAF)', fontsize=14)
+plt.title('Top 20 keywords decide anomalous (Random Forest WAF)', fontsize=14)
 plt.tight_layout()
 plt.savefig("rf_feature_importances.png", dpi=300)
 print("[+] Đã xuất biểu đồ giải thích AI ra file: rf_feature_importances.png")

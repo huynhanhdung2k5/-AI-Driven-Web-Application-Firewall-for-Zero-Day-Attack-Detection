@@ -10,6 +10,7 @@ from tensorflow.keras.layers import Input, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.decomposition import TruncatedSVD
 import time
 
 # --- HÀM TÍNH ĐỘ HỖN LOẠN (ENTROPY) ---
@@ -21,13 +22,24 @@ def calculate_entropy(s):
 
 # 1. Tải dữ liệu và TF-IDF
 print("[*] Đang tải dữ liệu và TF-IDF...")
-df = pd.read_csv("../data/csic_database_cleaned.csv")
+df = pd.read_csv("../data/super_waf_dataset.csv")
 df['Full_Payload'] = df['Full_Payload'].fillna('')
 y_true = df['Target'].values 
 
 vectorizer = joblib.load("tfidf_waf.pkl")
 X_sparse = vectorizer.transform(df['Full_Payload'])
 X_matrix = X_sparse.toarray()
+
+# =====================================================================
+# BƯỚC MỚI: GIẢM CHIỀU DỮ LIỆU TỪ 5000 XUỐNG 100 CHIỀU ĐẶC ĐẶC (DENSE)
+# =====================================================================
+print("[*] Đang ép ma trận thưa 5000 chiều xuống còn 100 chiều (TruncatedSVD)...")
+svd = TruncatedSVD(n_components=100, random_state=42)
+X_svd = svd.fit_transform(X_sparse)
+
+# Lưu lại màng lọc SVD này để WAF sử dụng trong quá trình quét Real-time
+joblib.dump(svd, "svd_waf.pkl")
+print(f"[+] Kích thước sau khi ép SVD: {X_svd.shape}")
 
 # 2. FEATURE ENGINEERING: Bơm thêm 3 Đặc trưng thủ công
 print("[*] Đang trích xuất các Siêu đặc trưng (Length, Special Chars, Entropy)...")
@@ -46,26 +58,30 @@ custom_features_scaled = scaler.fit_transform(custom_features)
 # Lưu bộ Scaler lại để Giai đoạn 3 (FastAPI) dùng
 joblib.dump(scaler, "custom_features_scaler.pkl")
 
-# HỢP THỂ: Ghép ma trận 5000 chiều (TF-IDF) với 3 chiều (Thủ công) = 5003 chiều
-X_combined = np.hstack((X_matrix, custom_features_scaled))
+# HỢP THỂ: Ghép ma trận 100 chiều (SVD) với 3 chiều (Thủ công) = 103 chiều
+X_combined = np.hstack((X_svd, custom_features_scaled))
 print(f"[+] Kích thước dữ liệu mới sau khi hợp thể: {X_combined.shape}")
 
 # 3. Xây dựng và Huấn luyện Autoencoder với Dữ liệu mới
-X_normal = X_combined[y_true == 1]
+X_normal = X_combined[y_true == 0]
 print(f"[*] Số lượng request sạch dùng để huấn luyện AE: {X_normal.shape[0]}")
 
-input_dim = X_combined.shape[1] # Bây giờ là 5003 chiều
+input_dim = X_combined.shape[1] 
 input_layer = Input(shape=(input_dim,))
-encoded = Dense(256, activation='relu')(input_layer)
+
+# Kiến trúc thắt cổ chai nhỏ hơn (103 -> 64 -> 16 -> 64 -> 103)
+encoded = Dense(64, activation='relu')(input_layer)
 encoded = Dropout(0.2)(encoded)
-bottleneck = Dense(32, activation='relu')(encoded)
-decoded = Dense(256, activation='relu')(bottleneck)
-output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+bottleneck = Dense(16, activation='relu')(encoded)
+decoded = Dense(64, activation='relu')(bottleneck)
+
+# SỬA QUAN TRỌNG: Đổi 'sigmoid' thành 'linear' vì dữ liệu SVD có chứa số âm
+output_layer = Dense(input_dim, activation='linear')(decoded)
 
 autoencoder = Model(inputs=input_layer, outputs=output_layer)
 autoencoder.compile(optimizer='adam', loss='mse')
 
-print("\n[*] Đang huấn luyện Autoencoder (Feature Engineering)...")
+print("\n[*] Đang huấn luyện Autoencoder (SVD + Feature Engineering)...")
 early_stop = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
 autoencoder.fit(
     X_normal, X_normal, 
@@ -89,8 +105,8 @@ best_threshold = 0
 best_accuracy = 0
 
 for percent in range(50, 100):
-    thresh_candidate = np.percentile(mse[y_true == 1], percent)
-    y_pred_candidate = np.where(mse > thresh_candidate, -1, 1)
+    thresh_candidate = np.percentile(mse[y_true == 0], percent)
+    y_pred_candidate = np.where(mse > thresh_candidate, 1, 0)
     current_acc = accuracy_score(y_true, y_pred_candidate)
     
     if current_acc > best_accuracy:
@@ -100,28 +116,28 @@ for percent in range(50, 100):
 print(f"\n[!] TÌM THẤY NGƯỠNG TỐI ƯU (THRESHOLD): {best_threshold:.6f}")
 print(f"[!] DỰ KIẾN ACCURACY CAO NHẤT ĐẠT: {best_accuracy*100:.2f}%")
 
-y_pred = np.where(mse > best_threshold, -1, 1)
+y_pred = np.where(mse > best_threshold, 1, 0)
 
 # 6. Đánh giá và Vẽ Ma trận nhầm lẫn
 print("\n" + "="*45)
-print("   BÁO CÁO KẾT QUẢ: AUTOENCODER + FEATURE ENGINEERING   ")
+print("   BÁO CÁO KẾT QUẢ: SVD AUTOENCODER   ")
 print("="*45)
 
 cm = confusion_matrix(y_true, y_pred)
 print("\n1. MA TRẬN NHẦM LẪN:")
 print(cm)
 print("\n2. CÁC CHỈ SỐ CHI TIẾT:")
-print(classification_report(y_true, y_pred, target_names=["Tấn công (-1)", "Bình thường (1)"]))
+print(classification_report(y_true, y_pred, target_names=["Normal (0)", "Attack (1)"]))
 
 # Vẽ biểu đồ
 plt.figure(figsize=(8, 6))
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-            xticklabels=["Tấn công (-1)", "Bình thường (1)"], 
-            yticklabels=["Tấn công (-1)", "Bình thường (1)"],
+            xticklabels=["Normal (0)", "Attack (1)"], 
+            yticklabels=["Normal (0)", "Attack (1)"], 
             annot_kws={"size": 14})
-plt.title('Ma trận nhầm lẫn - WAF Autoencoder (Feature Engineering)', fontsize=14, pad=20)
-plt.ylabel('Thực tế', fontsize=12)
-plt.xlabel('Dự đoán', fontsize=12)
+plt.title('Confusion Matrix - SVD Autoencoder (103 Dims)', fontsize=14, pad=20)
+plt.ylabel('True Label', fontsize=12)
+plt.xlabel('Predict Label', fontsize=12)
 plt.tight_layout()
 plt.savefig("fe_confusion_matrix.png", dpi=300)
 print("\n[+] Đã xuất ảnh Ma trận nhầm lẫn ra: fe_confusion_matrix.png")

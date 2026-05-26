@@ -5,17 +5,17 @@ import os
 
 
 # 1. Tải dữ liệu siêu sạch từ bước trước
-FILE_PATH = "../data/csic_database_cleaned.csv"
+FILE_PATH = "../data/super_waf_dataset.csv"
 print("[*] Đang tải dữ liệu...")
 df = pd.read_csv(FILE_PATH)
 
 # Đảm bảo không có dòng rỗng nào gây lỗi
 df['Full_Payload'] = df['Full_Payload'].fillna('')
 
-# 2. Khởi tạo thuật toán TF-IDF
-# Giới hạn 5000 đặc trưng (từ vựng) quan trọng nhất để AI chạy nhanh nhất trong môi trường Real-time
-print("[*] Đang học từ vựng và bóc tách đặc trưng (TF-IDF)...")
-vectorizer = TfidfVectorizer(max_features=5000)
+# === MỚI (NÂNG CẤP LÊN CHAR N-GRAMS) ===
+# analyzer='char': Quét theo từng ký tự
+# ngram_range=(2, 4): Cắt thành các cụm độ dài từ 2 đến 4 ký tự (ví dụ: "<s", "<sc", "<scr")
+vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 4), max_features=5000)
 
 # 3. Ép kiểu văn bản thành Ma trận số học (Toán học hóa)
 print("[*] Đang dịch văn bản sang ma trận số (việc này có thể mất vài giây)...")

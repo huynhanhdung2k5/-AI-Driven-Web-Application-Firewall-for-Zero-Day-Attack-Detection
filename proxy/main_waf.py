@@ -18,6 +18,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 import re
+from starlette.requests import ClientDisconnect
 warnings.filterwarnings('ignore')
 
 # ==========================================
@@ -109,7 +110,7 @@ async def check_dynamic_webacl(request: Request, client_ip: str) -> dict:
             recent_attack = [ts for ts in attack_trackers[client_ip] if current_time - ts < a_duration]
             if len(recent_attack) >= a_max_access :
                 penalty_minutes = a_rule.get("challenge_min", 30)
-                final_rule_name = f"{a_rule["name"]} (Escalated Penalty)"
+                final_rule_name = f"{a_rule['name']} (Escalated Penalty)"
                 final_action = a_rule.get("action", "Block")
                 print(f"IP {client_ip} has been penaltied for {penalty_minutes} minutes")
                 break
@@ -220,13 +221,41 @@ async def websocket_endpoint(websocket: WebSocket):
 # Mở cổng CORS cho phép Frontend ReactJS gọi API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Cho phép mọi nguồn gọi đến (Dùng cho môi trường Dev)
+    allow_origins=[
+        "http://localhost:3000",  # Cổng React truyền thống
+        "http://localhost:5173",  # Cổng React dùng Vite
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    # Tiến hành chạy tiếp luồng để lấy response từ hệ thống
+    response = await call_next(request)
+    
+    # 1. Chống MIME-sniffing (Bắt trình duyệt tuân thủ đúng định dạng file trả về)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    
+    # 2. Chống tấn công Clickjacking (Không cho phép chèn trang của bạn vào thẻ <iframe> lạ)
+    response.headers["X-Frame-Options"] = "DENY"
+    
+    # 3. Bảo vệ thông tin nguồn dẫn (Chỉ gửi referrer khi cùng mức độ an toàn)
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    
+    # 4. Định nghĩa chính sách tài nguyên CSP (Chỉ thực thi mã nguồn an toàn, chống XSS)
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+    
+    # 5. Vô hiệu hóa quyền truy cập phần cứng nhạy cảm nếu không cần thiết
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    
+    # 6. Ép trình duyệt bắt buộc dùng HTTPS (HSTS) - Rất quan trọng khi lên Production
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    
+    return response
+
 TARGET_SERVER = "http://localhost:5001"
-AE_THRESHOLD = 0.000062
+AE_THRESHOLD = 0.006
 
 # ==========================================
 # MODULE 1: AI CORE & DYNAMIC BASELINE
@@ -237,7 +266,7 @@ vectorizer = joblib.load(MODEL_DIR + "tfidf_waf.pkl")
 rf_model = joblib.load(MODEL_DIR + "random_forest_waf.pkl")
 autoencoder = load_model(MODEL_DIR + "full_autoencoder_waf_fe.h5", compile=False)
 scaler = joblib.load(MODEL_DIR + "custom_features_scaler.pkl")
-
+svd = joblib.load(MODEL_DIR + "svd_waf.pkl")
 print("[*] Tải Cấu hình Cơ sở Động (Dynamic Baseline Profile)...")
 # Nạp thẳng 1 profile chuẩn từ CSDL để đảm bảo AI nhận diện chính xác 100%
 df = pd.read_csv("../data/csic_database_cleaned.csv")
@@ -267,8 +296,10 @@ def calculate_entropy(s: str) -> float:
 
 def analyze_threat(payload: str) -> dict:
     """Trả về dict chứa trạng thái an toàn và lý do"""
+    #1. RF cần vector thô
     vector = vectorizer.transform([payload])
-    dense_vector = vector.toarray()
+    #2. Nén SVD cho AE
+    dense_vector_svd = svd.transform(vector)
     
     length = len(payload)
     special_chars = sum(not c.isalnum() and not c.isspace() for c in payload)
@@ -276,9 +307,9 @@ def analyze_threat(payload: str) -> dict:
     
     custom_features = np.array([[length, special_chars, entropy]])
     scaled_features = scaler.transform(custom_features)
-    ae_input = np.hstack((dense_vector, scaled_features))
+    ae_input = np.hstack((dense_vector_svd, scaled_features))
 
-    normal_index = list(rf_model.classes_).index(1)
+    normal_index = list(rf_model.classes_).index(0)
     rf_score = rf_model.predict_proba(vector)[0][normal_index] * 100
     
     if rf_score >= 80.0:
@@ -286,8 +317,10 @@ def analyze_threat(payload: str) -> dict:
     elif rf_score <= 30.0:
         return {"is_safe": False, "engine": "Random Forest", "reason": "Known Signature Detected"}
     else:
-        ae_reconstruction = autoencoder.predict(ae_input, verbose=0)
+        ae_reconstruction = autoencoder(ae_input, training=False).numpy()
         mse = np.mean(np.power(ae_input - ae_reconstruction, 2))
+        # Thêm dòng này để dễ dàng Debug trên Terminal
+        print(f"   [DEBUG] Autoencoder MSE: {mse:.6f} (Threshold: {AE_THRESHOLD})")
         if mse > AE_THRESHOLD:
             return {"is_safe": False, "engine": "Autoencoder", "reason": f"Zero-day Anomaly"}
         return {"is_safe": True, "engine": "Autoencoder", "score": mse}
@@ -375,13 +408,39 @@ class RuleCreate(BaseModel):
     challenge_min: int
 
 # ==========================================
-# MODULE 6: API CHO DASHBOARD FRONTEND
+# MODULE 6: API CHO FRONTEND
 # ==========================================
 @app.get("/api/logs")
-async def get_traffic_logs():
-    """Lấy toàn bộ lịch sử (cả xanh lẫn đỏ) để Frontend vẽ biểu đồ"""
+async def get_traffic_logs(page: int = 1, limit: int = 1000, method: Optional[str] = "All", action: Optional[str] = "All", type_filter: Optional[str] = "All"):
+    """Lấy toàn bộ lịch sử (cả xanh lẫn đỏ) để Frontend vẽ biểu đồ, có phân trang"""
+    # Tính toán vị trí bắt đầu cắt data
+    skip_count = (page - 1) * limit
+
+    # Dynamic query
+    query = {}
+    if method and method != "All":
+        query["method"] = method
+
+    if action and action != "All":
+        query["action"] = action 
+
+    if type_filter and type_filter != "All":
+        if type_filter == "Safe Traffic":
+            query["action"] = "PASSED"
+        elif type_filter == "Known Signature Detected":
+            query["attack_type"] = "Known Signature Threat"
+        elif type_filter == "Zero-day Anomaly":
+            query["attack_type"] = "Zero-Day Threat"
+        elif type_filter == "HTTP Flood / DoS Attempt":
+            query["attack_type"] = "HTTP Flood/DoS Attempt"
+        elif type_filter == "Violated WebACL Rules":
+            query["attack_type"] = "Violated WebACL Rules"
+
+    total_docs = await app.mongodb["traffic_logs"].count_documents(query)   
+
     logs = []
-    cursor = app.mongodb["traffic_logs"].find().sort("timestamp", -1).limit(1000)
+    #2 Chỉ lấy số lượng log của trang hiện tại
+    cursor = app.mongodb["traffic_logs"].find(query).sort("timestamp", -1).skip(skip_count).limit(limit)
     
     async for document in cursor:
         document["_id"] = str(document["_id"]) 
@@ -389,9 +448,79 @@ async def get_traffic_logs():
         
     return {
         "status": "success", 
-        "total_requests": len(logs), 
+        "total_requests": total_docs,
+        "total_pages": math.ceil(total_docs / limit),
+        "current_page": page, 
         "data": logs
     }
+
+# API cho Dashboard sử dụng Aggregation
+@app.get("/api/dashboard")
+async def get_dashboard_stats():
+    pipeline = [
+        {
+            "$facet": {
+                #1 đếm số request pass/block
+                "actions": [
+                    {"$group": {"_id": "$action", "count": {"$sum": 1}}}
+                ],
+                #2 Top IP
+                "top_ips": [
+                    {"$group": {"_id": "$client_ip", "count": {"$sum": 1}}},
+                    {"$sort": {"count": -1}},
+                    {"$limit": 5}
+                ],
+                #3 Top host
+                "top_hosts": [
+                    {"$group": {"_id": "$host", "count": {"$sum": 1}}},
+                    {"$sort": {"count": -1}},
+                    {"$limit": 5}
+                ],
+                #4 Top UA
+                "top_ua": [
+                    {"$group": {"_id": "$user_agent", "count": {"$sum": 1}}},
+                    {"$sort": {"count": -1}},
+                    {"$limit": 5}
+                ],
+                #5 HTTP Methods
+                "methods": [
+                    {"$group": {"_id": "$method", "count": {"$sum": 1}}}
+                ],
+                #6 HTTP Versions
+                "http_versions": [
+                    {"$group": {"_id": "$http_versions", "count": {"$sum": 1}}}
+                ],
+                #7 AI Efficiency
+                "engines": [
+                    {"$match": {"action": {"$in": ["BLOCKED", "RATE LIMIT EXCEEDED"]}}},
+                    {"$group": {"_id": "$blocked_by_engine", "count": {"$sum": 1}}}
+                ]
+            }
+        }
+    ]
+    cursor = app.mongodb["traffic_logs"].aggregate(pipeline)
+    result = await cursor.to_list(length=1)
+    if not result:
+        return {"status": "success", "data": {}}
+
+    data = result[0]
+    #Định dạng lại cấu trúc JSON cho React
+    total_requests = sum(item["count"] for item in data.get("actions", []))
+    passed_count = sum(item["count"] for item in data.get("actions", []) if item["_id"] == "PASSED")
+    blocked_count = total_requests - passed_count
+
+    formatted_data = {
+        "total_requests": total_requests,
+        "passed_count": passed_count,
+        "blocked_count": blocked_count,
+        "top_ips": [{"ip": item["_id"], "count": item["count"]} for item in data.get("top_ips", [])],
+        "top_hosts": [{"name": item["_id"] or "Unknown", "count": item["count"]} for item in data.get("top_hosts", [])],
+        "top_ua": [{"name": item["_id"] or "Unknown", "count": item["count"]} for item in data.get("top_ua", [])],
+        "methods": [{"name": item["_id"] or "Unknown", "value": item["count"]} for item in data.get("methods", [])],
+        "http_versions": [{"name": item["_id"] or "Unknown", "value": item["count"]} for item in data.get("http_versions", [])],
+        "engines": {item["_id"] or "None": item["count"] for item in data.get("engines", [])}
+    }
+    return {"status": "success", "data": formatted_data}
 
 # --- API 1: LẤY DANH SÁCH IP BỊ CHẶN (GỘP NHÓM BẰNG MONGODB AGGREGATION) ---
 @app.get("/api/waf/blocked-ips")
@@ -487,6 +616,13 @@ async def unblock_ip(ip: str):
         del penalty_box[ip]
         if ip in attack_trackers:
             del attack_trackers[ip]
+        for rule_id in list(dynamic_trackers.keys()):
+            if ip in dynamic_trackers[rule_id]:
+                del dynamic_trackers[rule_id][ip]
+                
+        for rule_id in list(error_trackers.keys()):
+            if ip in error_trackers[rule_id]:
+                del error_trackers[rule_id][ip]
 
         await ws_manager.broadcast({"type": "UNBLOCKED", "ip": ip})
         print(f"IP {ip} unblocked. You can continue")
@@ -509,41 +645,44 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
     path_with_query = request.url.path
     if request.url.query:
         path_with_query += f"?{request.url.query}"
-        
-    body_bytes = await request.body()
-    body_str = body_bytes.decode('utf-8', errors='ignore') if body_bytes else ""
-    
-    normalized_payload = reconstruct_payload(method, path_with_query, body_str)
-    
-    analysis_result = analyze_threat(normalized_payload)
-    print(f"[WAF] {method} {path_with_query} -> Phân tích bởi {analysis_result['engine']} -> An toàn: {analysis_result['is_safe']}")
-    
     
     client_ip = request.headers.get("x-fake-ip", request.client.host if request.client else "Unknown")
-    
     raw_version = request.scope.get("http_version", "1.1")
     http_version = f"HTTP/{raw_version}"
-    # ---------------------------------------------------------
-    # 1. KIỂM TRA WEBACL RULES (DYNAMIC TỪ MONGODB)
-    # ---------------------------------------------------------
     headers_dict = dict(request.headers)
+
+    # =========================================================
+    # LỚP 1: KIỂM TRA RATE LIMIT & WEBACL TRƯỚC TIÊN (SIÊU NHẸ)
+    # =========================================================
     acl_result = await check_dynamic_webacl(request, client_ip)
     
     if acl_result["blocked"]:
         rule_name = acl_result["rule_name"]
         print(f"   >>>[WEBACL] Đã chặn IP {client_ip} do vi phạm luật: {rule_name}")
         
-        # Ghi log rõ ràng tên luật bị vi phạm vào DB
         analysis_mock = {"engine": "WebACL Rules", "reason": f"Triggered rule: {rule_name}"}
         process_time = (time.time() - start_time ) * 1000
         bg_tasks.add_task(log_request_to_db, client_ip, request.method, request.url.path, http_version, headers_dict, analysis_mock, "RATE LIMIT EXCEEDED", "BLOCKED", 429, process_time)
         
-        # Tùy biến mã phản hồi theo Action cấu hình
         return HTMLResponse(
             content=f"<h1>Blocked by AI-WAF</h1><p>You violated Security Rule {rule_name}</p>", 
             status_code=429
         )
-    headers_dict = dict(request.headers)
+
+    # =========================================================
+    # LỚP 2: NẾU THOÁT RATE LIMIT, MỚI GỌI AI PHÂN TÍCH (NẶNG ĐÔ)
+    # =========================================================
+    try:
+        body_bytes = await request.body()
+    except ClientDisconnect:
+        print(f"   >>> [WARNING] Client suddenly disconnected. Skip this request.")
+        return Response(status_code=400) 
+        
+    body_str = body_bytes.decode('utf-8', errors='ignore') if body_bytes else ""
+    normalized_payload = reconstruct_payload(method, path_with_query, body_str)
+    
+    analysis_result = analyze_threat(normalized_payload)
+    print(f"[WAF] {method} {path_with_query} -> Analyze by: {analysis_result['engine']} -> Is safe: {analysis_result['is_safe']}")
     
 
     if not analysis_result["is_safe"]:
@@ -590,7 +729,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
             status_code=response.status_code,
             headers=response.headers
         )
-    except httpx.ConnectError:
+    except (httpx.ConnectError, httpx.HTTPError):
         process_time = (time.time() - start_time) * 1000
         await check_error_limiting(client_ip, 502)
         bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "PASSED", 502, process_time)

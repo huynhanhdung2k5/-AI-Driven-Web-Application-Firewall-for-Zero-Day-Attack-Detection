@@ -18,15 +18,15 @@ vectorizer = joblib.load("tfidf_waf.pkl")
 rf_model = joblib.load("random_forest_waf.pkl")
 autoencoder = load_model("full_autoencoder_waf_fe.h5", compile=False)
 scaler = joblib.load("custom_features_scaler.pkl") # Tải bộ chuẩn hóa 3 đặc trưng
-
-AE_THRESHOLD = 0.000062 # Điền ngưỡng của bạn vào đây
+svd = joblib.load("svd_waf.pkl")
+AE_THRESHOLD = 0.000391# Điền ngưỡng của bạn vào đây
 
 def scan_http_request(raw_payload):
     print(f"\n[+] Đang quét Payload:\n{raw_payload.strip()[:80]}...") 
     
     # BƯỚC A1: Dữ liệu 5000 chiều cho Random Forest
     vector = vectorizer.transform([raw_payload])
-    dense_vector = vector.toarray()
+    dense_vector_svd = svd.transform(vector)
     
     # BƯỚC A2: Chuẩn bị thêm 3 chiều cho Autoencoder
     length = len(raw_payload)
@@ -37,8 +37,8 @@ def scan_http_request(raw_payload):
     custom_features = np.array([[length, special_chars, entropy]])
     scaled_features = scaler.transform(custom_features)
     
-    # Hợp thể: 5000 + 3 = 5003 chiều
-    ae_input = np.hstack((dense_vector, scaled_features))
+    # Hợp thể: 100 chiều SVD + 3 chiều thủ công = 103 chiều
+    ae_input = np.hstack((dense_vector_svd, scaled_features))
 
     # BƯỚC B: Màng lọc 1 (Random Forest - Ăn 5000 chiều)
     rf_classes = list(rf_model.classes_)
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     print(scan_http_request(req_normal))
     
     # Test 2: Hacker SQL Injection (Đã biết)
-    req_sqli = """GET http://localhost:8080/tienda1/publico/carrito.jsp/.BAK HTTP/1.1
+    req_sqli = """GET http://localhost:8000/tienda1/publico/articulos.jsp?id=2&token=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ HTTP/1.1
 
 username=admin' OR 1=1--&password=123"""
     print(scan_http_request(req_sqli))
