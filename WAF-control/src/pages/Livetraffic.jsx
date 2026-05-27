@@ -14,7 +14,7 @@ const LiveTraffic = () => {
     // STATE cho Pagination
     const [totalRequest, setTotalRequest] = useState(0);
     const [currentPage, setCurrentPage] = useState(1);
-    const [pageSize, setPageSize] = useState(1000);
+    const [pageSize, setPageSize] = useState(20);
     const [jumpPage, setJumpPage] = useState('');
     const totalPages = Math.ceil(totalRequest / pageSize);
 

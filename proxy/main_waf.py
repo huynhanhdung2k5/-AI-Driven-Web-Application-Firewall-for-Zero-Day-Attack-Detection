@@ -411,7 +411,7 @@ class RuleCreate(BaseModel):
 # MODULE 6: API CHO FRONTEND
 # ==========================================
 @app.get("/api/logs")
-async def get_traffic_logs(page: int = 1, limit: int = 1000, method: Optional[str] = "All", action: Optional[str] = "All", type_filter: Optional[str] = "All"):
+async def get_traffic_logs(page: int = 1, limit: int = 20, method: Optional[str] = "All", action: Optional[str] = "All", type_filter: Optional[str] = "All"):
     """Lấy toàn bộ lịch sử (cả xanh lẫn đỏ) để Frontend vẽ biểu đồ, có phân trang"""
     # Tính toán vị trí bắt đầu cắt data
     skip_count = (page - 1) * limit
