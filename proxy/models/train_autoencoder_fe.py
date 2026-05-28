@@ -89,8 +89,8 @@ autoencoder.fit(
     callbacks=[early_stop], verbose=1
 )
 
-autoencoder.save("full_autoencoder_waf_fe.h5")
-print("[+] Đã lưu mô hình mới vào full_autoencoder_waf_fe.h5")
+autoencoder.save("full_autoencoder_waf_fe.keras")
+print("[+] Đã lưu mô hình mới vào full_autoencoder_waf_fe.keras")
 
 # 4. Tính toán Sai số tái tạo (MSE)
 print("\n[*] Đang dùng AI để vẽ lại và tính toán sai số...")
