@@ -30,6 +30,8 @@ services:
       - "8000:8000"
     environment:
       - MONGO_URL=mongodb://mongodb:27017/waf_db
+      # === THÊM DÒNG NÀY (Nhớ thay target_app bằng tên service đích thực tế của bạn) ===
+      - TARGET_SERVER_URL=http://target_app:80
     depends_on:
       - mongodb
 
