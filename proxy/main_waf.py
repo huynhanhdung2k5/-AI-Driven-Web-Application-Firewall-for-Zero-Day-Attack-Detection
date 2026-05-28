@@ -4,7 +4,8 @@ import uvicorn
 import httpx
 import joblib
 import numpy as np
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, InputLayer
 import math
 from collections import Counter
 import pandas as pd
@@ -265,7 +266,17 @@ print("[*] Khởi động Module AI...")
 MODEL_DIR = "./models/" 
 vectorizer = joblib.load(MODEL_DIR + "tfidf_waf.pkl")
 rf_model = joblib.load(MODEL_DIR + "random_forest_waf.pkl")
-autoencoder = load_model(MODEL_DIR + "full_autoencoder_waf_fe.keras", compile=False)
+# 1. KHỞI TẠO KIẾN TRÚC MẠNG (BẢN VẼ) TRƯỚC
+autoencoder = Sequential([
+    InputLayer(input_shape=(103,)),
+    Dense(64, activation='relu'),
+    Dropout(0.2),
+    Dense(16, activation='relu'),
+    Dense(64, activation='relu'),
+    Dense(103, activation='linear')
+])
+# 2. SAU ĐÓ MỚI ĐỔ TRỌNG SỐ VÀO
+autoencoder.load_weights(MODEL_DIR + "autoencoder.weights.h5")
 scaler = joblib.load(MODEL_DIR + "custom_features_scaler.pkl")
 svd = joblib.load(MODEL_DIR + "svd_waf.pkl")
 print("[*] Tải Cấu hình Cơ sở Động (Dynamic Baseline Profile)...")

@@ -89,7 +89,7 @@ autoencoder.fit(
     callbacks=[early_stop], verbose=1
 )
 
-autoencoder.save("full_autoencoder_waf_fe.keras")
+autoencoder.save_weights("autoencoder.weights.h5")
 print("[+] Đã lưu mô hình mới vào full_autoencoder_waf_fe.keras")
 
 # 4. Tính toán Sai số tái tạo (MSE)
@@ -139,5 +139,5 @@ plt.title('Confusion Matrix - SVD Autoencoder (103 Dims)', fontsize=14, pad=20)
 plt.ylabel('True Label', fontsize=12)
 plt.xlabel('Predict Label', fontsize=12)
 plt.tight_layout()
-plt.savefig("fe_confusion_matrix.png", dpi=300)
+#plt.savefig("fe_confusion_matrix.png", dpi=300)
 print("\n[+] Đã xuất ảnh Ma trận nhầm lẫn ra: fe_confusion_matrix.png")
