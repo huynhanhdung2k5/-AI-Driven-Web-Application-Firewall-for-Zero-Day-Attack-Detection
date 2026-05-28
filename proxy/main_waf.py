@@ -323,10 +323,13 @@ def analyze_threat(payload: str) -> dict:
 
     normal_index = list(rf_model.classes_).index(0)
     rf_score = rf_model.predict_proba(vector)[0][normal_index] * 100
+
+    # ===  Thêm log để giám sát điểm số RF ===
+    print(f"   [DEBUG] Random Forest Score: {rf_score:.2f}%")
     
-    if rf_score >= 80.0:
+    if rf_score >= 50.0:
         return {"is_safe": True, "engine": "Random Forest", "score": rf_score}
-    elif rf_score <= 30.0:
+    elif rf_score <= 15.0:
         return {"is_safe": False, "engine": "Random Forest", "reason": "Known Signature Detected"}
     else:
         ae_reconstruction = autoencoder(ae_input, training=False).numpy()
