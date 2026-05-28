@@ -28,7 +28,7 @@ const LiveTraffic = () => {
 
         const timeoutID = setTimeout(() => {
             if (!isMounted) return;
-            ws = new WebSocket('ws://localhost:8000/ws/waf');
+            ws = new WebSocket(`${import.meta.env.VITE_WS_URL}/ws/waf`);
             ws.onopen = () => {
                 console.log('Websocket is connected to LiveTraffic');
             };
@@ -65,7 +65,7 @@ const LiveTraffic = () => {
 
     const fetchLogs = async () => {
         try {
-            const response = await axios.get(`http://localhost:8000/api/logs?page=${currentPage}&limit=${pageSize}&method=${methodFilter}&action=${actionFilter}&type_filter=${WTFilter}`);
+            const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/logs?page=${currentPage}&limit=${pageSize}&method=${methodFilter}&action=${actionFilter}&type_filter=${WTFilter}`);
             setLogs(response.data.data);
             setTotalRequest(response.data.total_requests);
             setLoading(false);

@@ -42,7 +42,7 @@ const Dashboard = () => {
         let lastFetchTime = 0;
         const timeoutID = setTimeout(() => {
             if (!isMounted) return;
-            ws = new WebSocket('ws://localhost:8000/ws/waf');
+            ws = new WebSocket(`${import.meta.env.VITE_WS_URL}/ws/waf`);
             ws.onopen = () => {
                 console.log('Websocket is connected to Dashboard');
             }
@@ -76,7 +76,7 @@ const Dashboard = () => {
 
     const fetchLogs = async () => {
         try {
-            const response = await axios.get('http://localhost:8000/api/dashboard');
+            const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/dashboard`);
             setStats(response.data.data);
             setLoading(false);
         } catch (error) {

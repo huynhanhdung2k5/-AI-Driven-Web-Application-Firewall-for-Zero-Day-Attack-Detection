@@ -55,7 +55,7 @@ const Asset = () => {
                 challenge_min: Number(newRule.challenge)
             };
 
-            await axios.post('http://localhost:8000/api/waf/rules', payload);
+            await axios.post(`${import.meta.env.VITE_API_URL}/api/waf/rules`, payload);
 
             // Thành công: Đóng modal, tải lại danh sách, reset form
             setIsModalOpen(false);
@@ -74,7 +74,7 @@ const Asset = () => {
         const isConfirmed = window.confirm("Are you sure to delete this rule?");
         if (isConfirmed) {
             try {
-                await axios.delete(`http://localhost:8000/api/waf/rules/${rule_id}`);
+                await axios.delete(`${import.meta.env.VITE_API_URL}/api/waf/rules/${rule_id}`);
                 setRules(rules.filter(rule => rule.rule_id != rule_id));
             } catch (error) {
                 console.error("Error while delete rule:", error);
@@ -92,7 +92,7 @@ const Asset = () => {
         //khởi tạo kết nối WebSocket tới FastAPI
         const timeoutID = setTimeout(() => {
             if (!isMounted) return;
-            ws = new WebSocket('ws://localhost:8000/ws/waf');
+            ws = new WebSocket(`${import.meta.env.VITE_WS_URL}/ws/waf`);
             // Bổ sung log để dễ theo dõi trạng thái
             ws.onopen = () => {
                 console.log("WebSocket is connected to Asset!");
@@ -131,7 +131,7 @@ const Asset = () => {
             setLoading(true);
         }
         try {
-            const res = await axios.get('http://localhost:8000/api/waf/blocked-ips');
+            const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/waf/blocked-ips`);
             setBlockedRecords(res.data.data);
         } catch (error) {
             console.error("Lỗi lấy danh sách IP:", error);
@@ -141,7 +141,7 @@ const Asset = () => {
 
     const fetchRules = async () => {
         try {
-            const res = await axios.get('http://localhost:8000/api/waf/rules');
+            const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/waf/rules`);
             setRules(res.data.data);
         } catch (error) {
             console.error("Lỗi lấy danh sách Rules:", error);
@@ -155,7 +155,7 @@ const Asset = () => {
 
         try {
             // Gọi API lưu xuống DB
-            await axios.put(`http://localhost:8000/api/waf/rules/${rule_id}`, {
+            await axios.put(`${import.meta.env.VITE_API_URL}/api/waf/rules/${rule_id}`, {
                 enabled: !currentEnabled
             });
         } catch (error) {
@@ -167,7 +167,7 @@ const Asset = () => {
 
     const handleUnblockIp = async (ip) => {
         try {
-            await axios.delete(`http://localhost:8000/api/waf/unblock/${ip}`);
+            await axios.delete(`${import.meta.env.VITE_API_URL}/api/waf/unblock/${ip}`);
 
             setBlockedRecords(prev => prev.map(record =>
                 record.ip === ip ? { ...record, isUnblocked: true } : record));
