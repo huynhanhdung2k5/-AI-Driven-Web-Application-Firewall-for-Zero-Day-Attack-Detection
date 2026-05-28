@@ -265,7 +265,7 @@ print("[*] Khởi động Module AI...")
 MODEL_DIR = "./models/" 
 vectorizer = joblib.load(MODEL_DIR + "tfidf_waf.pkl")
 rf_model = joblib.load(MODEL_DIR + "random_forest_waf.pkl")
-autoencoder = load_model(MODEL_DIR + "full_autoencoder_waf_fe.keras", compile=False)
+autoencoder = load_model(MODEL_DIR + "full_autoencoder_waf_fe.h5", compile=False)
 scaler = joblib.load(MODEL_DIR + "custom_features_scaler.pkl")
 svd = joblib.load(MODEL_DIR + "svd_waf.pkl")
 print("[*] Tải Cấu hình Cơ sở Động (Dynamic Baseline Profile)...")
