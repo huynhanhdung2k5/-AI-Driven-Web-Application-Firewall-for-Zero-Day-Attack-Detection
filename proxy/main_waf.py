@@ -280,13 +280,14 @@ autoencoder.load_weights(MODEL_DIR + "autoencoder.weights.h5")
 scaler = joblib.load(MODEL_DIR + "custom_features_scaler.pkl")
 svd = joblib.load(MODEL_DIR + "svd_waf.pkl")
 print("[*] Tải Cấu hình Cơ sở Động (Dynamic Baseline Profile)...")
-# Nạp thẳng 1 profile chuẩn từ CSDL để đảm bảo AI nhận diện chính xác 100%
-df = pd.read_csv("./data/csic_database_cleaned.csv")
-# Lọc ra tất cả các request của Người dùng thật (Target == 1)
-normal_samples = df[df['Target'] == 1]['Full_Payload'].fillna('').tolist()
-# Lấy bóc tách phần thân (bỏ đi URL) 
-baseline_req = [req for req in normal_samples if req.startswith("GET")][0]
-DYNAMIC_BASELINE = baseline_req.split(' ', 2)[2] # Trích xuất phần lõi (từ HTTP/1.1 trở đi)
+# Gắn cứng một Baseline siêu sạch để không bị xung đột với TF-IDF mới
+DYNAMIC_BASELINE = (
+    "Host: localhost:8080\n"
+    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\n"
+    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\n"
+    "Accept-Language: en-US,en;q=0.5\n"
+    "Connection: keep-alive"
+)
 
 # ==========================================
 # MODULE 2: NORMALIZATION LAYER (LỚP CHUẨN HÓA)
