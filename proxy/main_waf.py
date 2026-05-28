@@ -270,7 +270,7 @@ scaler = joblib.load(MODEL_DIR + "custom_features_scaler.pkl")
 svd = joblib.load(MODEL_DIR + "svd_waf.pkl")
 print("[*] Tải Cấu hình Cơ sở Động (Dynamic Baseline Profile)...")
 # Nạp thẳng 1 profile chuẩn từ CSDL để đảm bảo AI nhận diện chính xác 100%
-df = pd.read_csv("../data/csic_database_cleaned.csv")
+df = pd.read_csv("./data/csic_database_cleaned.csv")
 # Lọc ra tất cả các request của Người dùng thật (Target == 1)
 normal_samples = df[df['Target'] == 1]['Full_Payload'].fillna('').tolist()
 # Lấy bóc tách phần thân (bỏ đi URL) 
