@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # 1. Cơ sở dữ liệu MongoDB
+  mongodb:
+    image: mongo:6.0
+    container_name: waf_mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  # ===============================================
+  # 2. SERVER ĐÍCH BÙ NHÌN (Cái mà WAF sẽ bảo vệ)
+  # ===============================================
+  target_app:
+    image: nginxdemos/hello:plain-text
+    container_name: waf_target_backend
+    restart: always
+    # TUYỆT ĐỐI KHÔNG DÙNG "ports" Ở ĐÂY. 
+    # Bọn Hacker ngoài Internet không thể truy cập thẳng vào đây được.
+
+    # 2. Bộ não AI-WAF Proxy Backend
+  backend:
+    build: ./proxy
+    container_name: waf_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017/waf_db
+    depends_on:
+      - mongodb
+
+  # 3. Giao diện Giám sát Frontend Dashboard
+  frontend:
+    build: ./WAF-control
+    container_name: waf_frontend
+    restart: always
+    ports:
+      - "80:80" # Mở cổng 80 tiêu chuẩn của Web mạng Internet
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data: # Giúp giữ lại toàn bộ dữ liệu log trong MongoDB kể cả khi tắt container

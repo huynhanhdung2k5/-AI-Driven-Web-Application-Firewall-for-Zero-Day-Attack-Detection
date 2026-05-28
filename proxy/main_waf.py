@@ -18,6 +18,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 import re
+import os
 from starlette.requests import ClientDisconnect
 warnings.filterwarnings('ignore')
 
@@ -254,14 +255,14 @@ async def add_security_headers(request: Request, call_next):
     
     return response
 
-TARGET_SERVER = "http://localhost:5001"
+TARGET_SERVER = os.getenv("TARGET_SERVER_URL", "http://localhost:5001")
 AE_THRESHOLD = 0.006
 
 # ==========================================
 # MODULE 1: AI CORE & DYNAMIC BASELINE
 # ==========================================
 print("[*] Khởi động Module AI...")
-MODEL_DIR = "../models/" 
+MODEL_DIR = "./models/" 
 vectorizer = joblib.load(MODEL_DIR + "tfidf_waf.pkl")
 rf_model = joblib.load(MODEL_DIR + "random_forest_waf.pkl")
 autoencoder = load_model(MODEL_DIR + "full_autoencoder_waf_fe.h5", compile=False)
@@ -328,7 +329,7 @@ def analyze_threat(payload: str) -> dict:
 # ==========================================
 # MODULE 5: DATABASE & ASYNC LOGGING 
 # ==========================================
-MONGO_URL = "mongodb://localhost:27017"
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 
 @app.on_event("startup")
 async def startup_db_client():
