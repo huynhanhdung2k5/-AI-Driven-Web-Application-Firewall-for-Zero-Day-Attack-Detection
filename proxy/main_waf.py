@@ -707,9 +707,16 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         return Response(status_code=400) 
         
     body_str = body_bytes.decode('utf-8', errors='ignore') if body_bytes else ""
-    normalized_payload = reconstruct_payload(method, path_with_query, http_version, headers_dict, body_str)
+    # 1. Payload dùng để GHI LOG (Giữ nguyên 100% sự thật để báo cáo đồ án)
+    raw_payload_for_log = reconstruct_payload(method, path_with_query, http_version, headers_dict, body_str)
     
-    analysis_result = analyze_threat(normalized_payload, method, path_with_query)
+    # 2. Payload dùng cho AI PHÂN TÍCH (Lọc bỏ Header nhiễu, đưa về đúng form AI đã học)
+    ai_payload = f"{method} {path_with_query} {http_version}"
+    if body_str:
+        ai_payload += f" {body_str}"
+    
+    # 3. Đưa ai_payload vào cho mô hình dự đoán
+    analysis_result = analyze_threat(ai_payload, method, path_with_query)
     print(f"[WAF] {method} {path_with_query} -> Analyze by: {analysis_result['engine']} -> Is safe: {analysis_result['is_safe']}")
     
 
@@ -719,7 +726,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         
         # --- NÉM VIỆC GHI LOG CHO TIẾN TRÌNH CHẠY NGẦM ---
         client_ip = request.headers.get("x-fake-ip", request.client.host if request.client else "Unknown") #request.client.host if request.client else "Unknown IP"
-        bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "BLOCKED", 403, process_time)
+        bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, raw_payload_for_log, "BLOCKED", 403, process_time)
         
         #Đưa cho Error Limiting đếm lỗi 403
         await check_error_limiting(client_ip, 403)
@@ -751,7 +758,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         response = await client.send(req, stream=True)
         process_time = (time.time() - start_time) * 1000
         await check_error_limiting(client_ip, response.status_code)
-        bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "PASSED", response.status_code, process_time)
+        bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, raw_payload_for_log, "PASSED", response.status_code, process_time)
         return StreamingResponse(
             response.aiter_raw(),
             status_code=response.status_code,
@@ -760,7 +767,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
     except (httpx.ConnectError, httpx.HTTPError):
         process_time = (time.time() - start_time) * 1000
         await check_error_limiting(client_ip, 502)
-        bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, normalized_payload, "PASSED", 502, process_time)
+        bg_tasks.add_task(log_request_to_db, client_ip, method, request.url.path, http_version, headers_dict, analysis_result, raw_payload_for_log, "PASSED", 502, process_time)
         return HTMLResponse(content="<h1>502 Bad Gateway</h1><p>Target Server (Port 5001) Offline.</p>", status_code = 502)
 
 
