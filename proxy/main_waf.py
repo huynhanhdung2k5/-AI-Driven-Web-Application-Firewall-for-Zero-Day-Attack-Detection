@@ -341,7 +341,7 @@ def analyze_threat(payload: str, method: str, path: str) -> dict:
     
     if rf_score >= 50.0:
         return {"is_safe": True, "engine": "Random Forest", "score": rf_score}
-    elif rf_score <= 40.0:
+    elif rf_score <= 20.0:
         return {"is_safe": False, "engine": "Random Forest", "reason": "Known Signature Detected"}
     else:
         # --- DỰ ĐOÁN VỚI AUTOENCODER (MÀNG LỌC 2) ---
