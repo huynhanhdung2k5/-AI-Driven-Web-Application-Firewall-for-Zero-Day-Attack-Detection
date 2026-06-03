@@ -184,9 +184,7 @@ const Asset = () => {
                 <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                     <div className="p-4 border-b border-gray-100 flex flex-wrap gap-4 items-center justify-between">
                         <div className="flex flex-wrap gap-3 flex-1">
-                            {/* Thanh công cụ tìm kiếm */}
-                            <input type="text" placeholder="IP Addr" className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-40 outline-none focus:border-primary" />
-                            <input type="text" placeholder="Application" className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-40 outline-none focus:border-primary" />
+
                         </div>
 
                         <div className="flex gap-3">

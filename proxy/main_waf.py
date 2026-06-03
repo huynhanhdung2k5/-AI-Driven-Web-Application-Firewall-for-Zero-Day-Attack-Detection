@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import re
 import os
 from starlette.requests import ClientDisconnect
+import scipy.sparse as sp
 warnings.filterwarnings('ignore')
 
 # ==========================================
@@ -258,7 +259,7 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 TARGET_SERVER = os.getenv("TARGET_SERVER_URL", "http://localhost:5001")
-AE_THRESHOLD = 0.006
+AE_THRESHOLD = 0.003
 
 # ==========================================
 # MODULE 1: AI CORE & DYNAMIC BASELINE
@@ -269,36 +270,36 @@ vectorizer = joblib.load(MODEL_DIR + "tfidf_waf.pkl")
 rf_model = joblib.load(MODEL_DIR + "random_forest_waf.pkl")
 # 1. KHỞI TẠO KIẾN TRÚC MẠNG (BẢN VẼ) TRƯỚC
 autoencoder = Sequential([
-    InputLayer(input_shape=(103,)),
+    InputLayer(input_shape=(105,)),
     Dense(64, activation='relu'),
     Dropout(0.2),
     Dense(16, activation='relu'),
     Dense(64, activation='relu'),
-    Dense(103, activation='linear')
+    Dense(105, activation='linear')
 ])
 # 2. SAU ĐÓ MỚI ĐỔ TRỌNG SỐ VÀO
 autoencoder.load_weights(MODEL_DIR + "autoencoder.weights.h5")
 scaler = joblib.load(MODEL_DIR + "custom_features_scaler.pkl")
 svd = joblib.load(MODEL_DIR + "svd_waf.pkl")
-print("[*] Tải Cấu hình Cơ sở Động (Dynamic Baseline Profile)...")
-# Gắn cứng một Baseline siêu sạch để không bị xung đột với TF-IDF mới
-DYNAMIC_BASELINE = (
-    "Host: localhost:8080\n"
-    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\n"
-    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\n"
-    "Accept-Language: en-US,en;q=0.5\n"
-    "Connection: keep-alive"
-)
+
 
 # ==========================================
 # MODULE 2: NORMALIZATION LAYER (LỚP CHUẨN HÓA)
 # ==========================================
-def reconstruct_payload(method: str, path_with_query: str, body_str: str) -> str:
-    """Tái cấu trúc Request về định dạng Baseline trước khi đưa vào AI"""
-    normalized_payload = f"{method} http://localhost:8080{path_with_query} {DYNAMIC_BASELINE}"
+def reconstruct_payload(method: str, path_with_query: str, http_version: str, headers: dict, body_str: str) -> str:
+    """Tái cấu trúc Request từ 100% dữ liệu thật của Client"""
+    # 1. Khởi tạo dòng đầu tiên (Ví dụ: GET /api/route HTTP/1.1)
+    payload = f"{method} {path_with_query} {http_version}\n"
+    
+    # 2. Ráp toàn bộ Headers thật của Client vào
+    for key, value in headers.items():
+        payload += f"{key.title()}: {value}\n"
+        
+    # 3. Nối Body (Nếu là method POST/PUT)
     if body_str:
-        normalized_payload += f"\n\n{body_str}"
-    return normalized_payload
+        payload += f"\n{body_str}"
+        
+    return payload
 
 # ==========================================
 # MODULE 3: THREAT ANALYSIS (PHÂN TÍCH MỐI ĐE DỌA)
@@ -308,38 +309,48 @@ def calculate_entropy(s: str) -> float:
     p, lns = Counter(s), float(len(s))
     return -sum(count/lns * math.log(count/lns, 2) for count in p.values())
 
-def analyze_threat(payload: str) -> dict:
+def analyze_threat(payload: str, method: str, path: str) -> dict:
     """Trả về dict chứa trạng thái an toàn và lý do"""
-    #1. RF cần vector thô
+    # 1. Trích xuất văn bản (TF-IDF)
     vector = vectorizer.transform([payload])
-    #2. Nén SVD cho AE
+    
+    # 2. Trích xuất đặc trưng Cấu trúc
+    is_risky_method = 1.0 if method.upper() in ['POST', 'PUT', 'DELETE', 'PATCH'] else 0.0
+    path_length = float(len(path))
+    sensitive_keywords = ['_next', 'api', 'env', 'config', 'admin', 'setup', 'xml', 'json']
+    has_sensitive_keyword = 1.0 if any(w in path.lower() for w in sensitive_keywords) else 0.0
+    
+    # 3. Chuẩn bị Input cho Random Forest (TF-IDF 5000 chiều + 3 Cấu trúc)
+    rf_custom = np.array([[is_risky_method, path_length, has_sensitive_keyword]])
+    rf_input = sp.hstack([vector, rf_custom])
+    
+    # 4. Chuẩn bị Input cho Autoencoder (SVD 100 chiều + 5 Đặc trưng)
     dense_vector_svd = svd.transform(vector)
+    special_chars = float(sum(not c.isalnum() and not c.isspace() for c in payload))
+    entropy = float(calculate_entropy(payload))
     
-    length = len(payload)
-    special_chars = sum(not c.isalnum() and not c.isspace() for c in payload)
-    entropy = calculate_entropy(payload)
-    
-    custom_features = np.array([[length, special_chars, entropy]])
-    scaled_features = scaler.transform(custom_features)
+    ae_custom = np.array([[is_risky_method, path_length, has_sensitive_keyword, special_chars, entropy]])
+    scaled_features = scaler.transform(ae_custom)
     ae_input = np.hstack((dense_vector_svd, scaled_features))
 
+    # --- DỰ ĐOÁN VỚI RANDOM FOREST ---
     normal_index = list(rf_model.classes_).index(0)
-    rf_score = rf_model.predict_proba(vector)[0][normal_index] * 100
+    rf_score = rf_model.predict_proba(rf_input)[0][normal_index] * 100
 
-    # ===  Thêm log để giám sát điểm số RF ===
     print(f"   [DEBUG] Random Forest Score: {rf_score:.2f}%")
     
     if rf_score >= 50.0:
         return {"is_safe": True, "engine": "Random Forest", "score": rf_score}
-    elif rf_score <= 15.0:
+    elif rf_score <= 40.0:
         return {"is_safe": False, "engine": "Random Forest", "reason": "Known Signature Detected"}
     else:
+        # --- DỰ ĐOÁN VỚI AUTOENCODER (MÀNG LỌC 2) ---
         ae_reconstruction = autoencoder(ae_input, training=False).numpy()
         mse = np.mean(np.power(ae_input - ae_reconstruction, 2))
-        # Thêm dòng này để dễ dàng Debug trên Terminal
         print(f"   [DEBUG] Autoencoder MSE: {mse:.6f} (Threshold: {AE_THRESHOLD})")
+        
         if mse > AE_THRESHOLD:
-            return {"is_safe": False, "engine": "Autoencoder", "reason": f"Zero-day Anomaly"}
+            return {"is_safe": False, "engine": "Autoencoder", "reason": "Zero-day Anomaly"}
         return {"is_safe": True, "engine": "Autoencoder", "score": mse}
 
 # ==========================================
@@ -696,9 +707,9 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         return Response(status_code=400) 
         
     body_str = body_bytes.decode('utf-8', errors='ignore') if body_bytes else ""
-    normalized_payload = reconstruct_payload(method, path_with_query, body_str)
+    normalized_payload = reconstruct_payload(method, path_with_query, http_version, headers_dict, body_str)
     
-    analysis_result = analyze_threat(normalized_payload)
+    analysis_result = analyze_threat(normalized_payload, method, path_with_query)
     print(f"[WAF] {method} {path_with_query} -> Analyze by: {analysis_result['engine']} -> Is safe: {analysis_result['is_safe']}")
     
 
