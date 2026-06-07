@@ -30,7 +30,11 @@ df['Path'] = df['Clean_Payload'].apply(lambda x: x.split()[1] if len(x.split()) 
 is_risky_method = df['Method'].isin(['POST', 'PUT', 'DELETE', 'PATCH']).astype(float).values.reshape(-1, 1)
 path_length = df['Path'].apply(len).astype(float).values.reshape(-1, 1)
 
-sensitive_keywords = ['_next', 'api', 'env', 'config', 'admin', 'setup', 'xml', 'json']
+sensitive_keywords = [
+    'env', 'config', 'admin', 'setup', 'xml', 'json', 
+    'credentials', 'gcp', 'google', 'firebase', 'secret', 
+    'key', 'npmrc', 'account', 'auth', 'token'
+]
 has_sensitive_keyword = df['Path'].apply(
     lambda x: 1.0 if any(word in str(x).lower() for word in sensitive_keywords) else 0.0
 ).values.reshape(-1, 1)
@@ -41,17 +45,19 @@ X_combined = hstack([X_sparse, is_risky_method, path_length, has_sensitive_keywo
 
 # 2. CHIA TẬP DỮ LIỆU (Train/Test Split)
 # Thay X_sparse bằng X_combined
-print("[*] Đang chia tập dữ liệu (80% Train, 20% Test)...")
-X_train, X_test, y_train, y_test = train_test_split(X_combined, y_true, test_size=0.2, random_state=42)
+print("[*] Đang chia tập dữ liệu (90% Train, 10% Test)...")
+X_train, X_test, y_train, y_test = train_test_split(X_combined, y_true, test_size=0.1, random_state=42)
 
 
 # 3. Khởi tạo và Huấn luyện Rừng ngẫu nhiên (Random Forest)
 print(f"[*] Đang huấn luyện Random Forest trên {X_train.shape[0]} request (Mất khoảng vài chục giây)...")
 start_time = time.time()
 
-rf_model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+rf_model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1, oob_score=True)
 rf_model.fit(X_train, y_train)
 
+# In ra điểm Validation ngầm để đưa vào báo cáo
+print(f"[+] Điểm Validation ngầm (OOB Score): {rf_model.oob_score_ * 100:.2f}%")
 print(f"[+] Huấn luyện xong! Thời gian: {time.time() - start_time:.2f} giây.")
 
 
@@ -83,7 +89,7 @@ plt.ylabel('True Label', fontsize=12)
 plt.xlabel('Predicted Label', fontsize=12)
 plt.tight_layout()
 plt.savefig("rf_confusion_matrix.png", dpi=300)
-print("[+] Đã xuất ảnh Ma trận nhầm lẫn ra file: rf_confusion_matrix.png")
+print("[+] Đã xuất ảnh Ma trận nhầm lẫn ra file: rf_confusion_matrix_final.png")
 
 
 # 6. Trích xuất top 20 Từ khóa nguy hiểm nhất (ĐÃ SỬA LỖI ĐỒNG BỘ CHIỀU)
@@ -103,7 +109,7 @@ sns.barplot(x='Importance', y='Feature', data=feature_importance_df, palette='Re
 plt.title('Top 20 Features decide anomalous (Random Forest WAF)', fontsize=14)
 plt.tight_layout()
 plt.savefig("rf_feature_importances.png", dpi=300)
-print("[+] Đã xuất biểu đồ giải thích AI ra file: rf_feature_importances.png")
+print("[+] Đã xuất biểu đồ giải thích AI ra file: rf_feature_importances_final.png")
 
 
 # 7. Xuất chuồng (Export Model)

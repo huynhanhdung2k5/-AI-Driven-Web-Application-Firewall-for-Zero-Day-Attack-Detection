@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Calendar, Settings, X, Plus, Trash2, ArrowLeft, RefreshCw } from 'lucide-react';
+import { Calendar, Settings, X, Plus, Trash2, ArrowLeft, RefreshCw, Pencil } from 'lucide-react';
 
 const Asset = () => {
     const [viewMode, setViewMode] = useState('table');
@@ -10,6 +10,11 @@ const Asset = () => {
     const [blockedRecords, setBlockedRecords] = useState([]);
     const [rules, setRules] = useState([]);
     const [loading, setLoading] = useState(true);
+    // State quản lý việc đang Edit rule nào (null = Tạo mới)
+    const [editingRuleId, setEditingRuleId] = useState(null);
+    // Tạo một cái khóa từ tính không phụ thuộc vào chu kỳ Render của React
+    const submitLock = useRef(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     // State quản lý form tạo Rule mới
     const [newRule, setNewRule] = useState({
@@ -21,11 +26,41 @@ const Asset = () => {
         duration: 0,
         access: 0,
         action: 'Challenge',
-        challenge: 0
+        challenge: 0,
+        enabled: true
     });
 
+    // Hàm đóng Modal và Reset form cho sạch sẽ
+    const handleCloseModal = () => {
+        setIsModalOpen(false);
+        setEditingRuleId(null);
+        setNewRule({
+            category: 'Access Limiting', name: '', matchTarget: 'URL Path', operator: 'Equals',
+            content: '', duration: 0, access: 0, action: 'Challenge', challenge: 0, enabled: true
+        });
+    };
+
+    // Hàm mở Modal và nạp dữ liệu cũ vào form để Edit
+    const handleEditClick = (rule) => {
+        setNewRule({
+            category: rule.category,
+            name: rule.name,
+            matchTarget: rule.match_target,
+            operator: rule.operator,
+            content: rule.content,
+            duration: rule.duration_sec,
+            access: rule.access_count,
+            action: rule.action,
+            challenge: rule.challenge_min,
+            enabled: rule.enabled // Giữ nguyên trạng thái bật/tắt hiện tại
+        });
+        setEditingRuleId(rule.rule_id);
+        setIsModalOpen(true);
+    };
+
     // Hàm gửi dữ liệu lên Backend
-    const handleAddRule = async () => {
+    const handleSubmitRule = async () => {
+
         // Ràng buộc nhập liệu cơ bản
         if (!newRule.name || !newRule.content) {
             alert("Please fill Rule name and Content!");
@@ -34,10 +69,20 @@ const Asset = () => {
 
         try {
             // Tự động tạo câu Description cho đẹp dựa trên các thông số
-            const contentText = newRule.content === ".*" ? "any content" : `content ${newRule.content}`;
+            let contentText = "";
+            if (newRule.content === "^$") {
+                contentText = "no content";
+            } else if (newRule.content === ".*") {
+                contentText = "any content";
+            } else {
+                // Loại bỏ cụm (?i) nếu có để phần hiển thị description gọn gàng hơn
+                const displayContent = newRule.content.replace(/\(\?i\)/g, '');
+                contentText = `content ${displayContent}`;
+            }
+
             const descTemplate = {
-                'Error Limiting': `An IP that triggers ${newRule.content} errors within ${newRule.duration} seconds will be blocked for ${newRule.challenge} minutes `,
-                'Attack Limiting': `An IP that triggers attack blocking ${newRule.access} times within ${newRule.duration} seconds will be blocked for ${newRule.challenge} minutes `,
+                'Error Limiting': `An ${newRule.matchTarget} that triggers ${newRule.content} errors within ${newRule.duration} seconds will be blocked for ${newRule.challenge} minutes `,
+                'Attack Limiting': `An ${newRule.matchTarget} that triggers attack blocking ${newRule.access} times within ${newRule.duration} seconds will be blocked for ${newRule.challenge} minutes `,
                 'Access Limiting': `An ${newRule.matchTarget} with ${contentText} that makes ${newRule.access} request within ${newRule.duration} seconds will be blocked for ${newRule.challenge} minutes `,
             }
             let desc = descTemplate[newRule.category] || descTemplate['Access Limiting']
@@ -45,7 +90,7 @@ const Asset = () => {
                 category: newRule.category,
                 name: newRule.name,
                 desc: desc,
-                enabled: true, // Tạo xong là kích hoạt luôn
+                enabled: newRule.enabled, // Giữ nguyên trạng thái khi edit
                 match_target: newRule.matchTarget,
                 operator: newRule.operator,
                 content: newRule.content,
@@ -55,18 +100,23 @@ const Asset = () => {
                 challenge_min: Number(newRule.challenge)
             };
 
-            await axios.post(`${import.meta.env.VITE_API_URL}/api/waf/rules`, payload);
+            if (editingRuleId) {
+                // Gọi API PUT nếu đang ở chế độ Edit
+                await axios.put(`${import.meta.env.VITE_API_URL}/api/waf/rules/${editingRuleId}`, payload);
+            } else {
+                // Gọi API POST nếu đang tạo mới
+                await axios.post(`${import.meta.env.VITE_API_URL}/api/waf/rules`, payload);
+            }
+
+
 
             // Thành công: Đóng modal, tải lại danh sách, reset form
-            setIsModalOpen(false);
+            handleCloseModal();
             fetchRules();
-            setNewRule({
-                category: 'Access Limiting', name: '', matchTarget: 'URL Path', operator: 'Equals',
-                content: '', duration: 0, access: 0, action: 'Challenge', challenge: 0
-            });
+
         } catch (error) {
-            console.error("Lỗi khi tạo Rule:", error);
-            alert("There was an error while making rule!");
+            console.error("Lỗi khi lưu Rule:", error);
+            alert("There was an error while saving rule!");
         }
     };
 
@@ -150,17 +200,15 @@ const Asset = () => {
 
     // Hàm gọi API để bật/tắt Rule thật trên Backend
     const toggleRule = async (rule_id, currentEnabled) => {
-        // Optimistic UI Update (Đổi màu ngay lập tức cho mượt, không cần chờ mạng)
         setRules(rules.map(r => r.rule_id === rule_id ? { ...r, enabled: !currentEnabled } : r));
-
         try {
-            // Gọi API lưu xuống DB
+            // Chú ý: Backend của bạn phải hỗ trợ việc update partial (chỉ gửi enabled) 
+            // hoặc bạn phải đảm bảo API cập nhật lại đầy đủ dữ liệu.
             await axios.put(`${import.meta.env.VITE_API_URL}/api/waf/rules/${rule_id}`, {
                 enabled: !currentEnabled
             });
         } catch (error) {
             console.error("Lỗi cập nhật Rule:", error);
-            // Nếu lỗi thì hoàn tác lại UI
             fetchRules();
         }
     };
@@ -269,7 +317,10 @@ const Asset = () => {
 
                         {/* NÚT "ADD RULES" */}
                         <button
-                            onClick={() => setIsModalOpen(true)}
+                            onClick={() => {
+                                handleCloseModal(); // Xóa dữ liệu rác nếu có
+                                setIsModalOpen(true);
+                            }}
                             className="flex items-center gap-2 px-4 py-2 bg-primary text-white font-bold text-sm rounded-lg hover:brightness-110 transition-colors shadow-sm"
                         >
                             ADD RULES <Plus size={16} />
@@ -306,9 +357,19 @@ const Asset = () => {
                                                     </div>
                                                 </div>
                                                 {rule.enabled && <span className="px-3 py-1 bg-green-100 text-green-600 text-xs font-bold rounded-full">ACTIVE</span>}
-                                                <button onClick={() => handleDeleteRule(rule.rule_id)}
-                                                    className="text-gray-300 hover:text-red-500 transition-colors p-2 rounded-lg "
-                                                    title="Xóa Rule này"><Trash2 size={18} /></button>
+                                                <div className="flex items-center gap-2">
+                                                    {/* Nút Edit mới thêm */}
+                                                    <button onClick={() => handleEditClick(rule)}
+                                                        className="text-gray-300 hover:text-blue-500 transition-colors p-2 rounded-lg"
+                                                        title="Sửa Rule này">
+                                                        <Pencil size={18} />
+                                                    </button>
+                                                    <button onClick={() => handleDeleteRule(rule.rule_id)}
+                                                        className="text-gray-300 hover:text-red-500 transition-colors p-2 rounded-lg"
+                                                        title="Xóa Rule này">
+                                                        <Trash2 size={18} />
+                                                    </button>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -324,15 +385,16 @@ const Asset = () => {
                 <div className="fixed inset-0 z-999 flex items-center justify-center bg-gray-900/40 backdrop-blur-sm px-4">
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
 
-                        {/* Header Modal */}
                         <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                            <h2 className="text-lg font-bold text-gray-800">Add rules</h2>
-                            <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-red-500 transition-colors">
+                            {/* Tiêu đề thay đổi linh hoạt */}
+                            <h2 className="text-lg font-bold text-gray-800">
+                                {editingRuleId ? 'Edit Rule' : 'Add Rule'}
+                            </h2>
+                            <button onClick={handleCloseModal} className="text-gray-400 hover:text-red-500 transition-colors">
                                 <X size={20} />
                             </button>
                         </div>
 
-                        {/* Body Modal */}
                         <div className="p-6 space-y-6">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
@@ -383,7 +445,11 @@ const Asset = () => {
                                         />
                                     </div>
                                 </div>
-                                <div className='text-xs text-gray-500'>For Access Limiting and Attack Limiting, to apply rule to all request, change Operator to "Matches Regex" and Content to " .* "</div>
+                                <div className="text-xs text-gray-500 mt-2 space-y-1">
+                                    <p>• To apply rule to all requests, change Operator to "Matches Regex" and Content to " <strong>.*</strong> "</p>
+                                    <p>• To match exactly empty value (e.g. no User-Agent), use Content " <strong>^$</strong> "</p>
+                                    <p>• To make regex case-insensitive, add " <strong>(?i)</strong> " at the beginning (e.g. <strong>(?i)(curl|nmap)</strong>)</p>
+                                </div>
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                                 <div>
@@ -403,7 +469,6 @@ const Asset = () => {
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Action</label>
                                     <select value={newRule.action} onChange={e => setNewRule({ ...newRule, action: e.target.value })} className="w-full border border-gray-200 rounded-lg p-2.5 outline-none text-sm bg-white focus:border-primary">
-                                        <option value="Challenge">Challenge</option>
                                         <option value="Block">Block</option>
                                     </select>
                                 </div>
@@ -417,13 +482,13 @@ const Asset = () => {
                             </div>
                         </div>
 
-                        {/* Footer Modal ĐÃ ĐƯỢC ĐƯA RA NGOÀI BODY */}
                         <div className="flex items-center justify-end gap-3 p-5 border-t border-gray-100 bg-gray-50/50">
-                            <button onClick={() => setIsModalOpen(false)} className="px-5 py-2 text-gray-500 font-bold text-sm hover:text-gray-700 transition-colors">
+                            <button onClick={handleCloseModal} className="px-5 py-2 text-gray-500 font-bold text-sm hover:text-gray-700 transition-colors">
                                 CANCEL
                             </button>
-                            <button onClick={handleAddRule} className="px-6 py-2 bg-primary text-white font-bold text-sm rounded-lg hover:brightness-110 transition-colors shadow-md">
-                                SUBMIT
+                            {/* Nút bấm cũng thay đổi tên tùy thuộc vào việc Thêm hay Sửa */}
+                            <button onClick={handleSubmitRule} className="px-6 py-2 bg-primary text-white font-bold text-sm rounded-lg hover:brightness-110 transition-colors shadow-md">
+                                {editingRuleId ? 'SAVE CHANGES' : 'SUBMIT'}
                             </button>
                         </div>
                     </div>

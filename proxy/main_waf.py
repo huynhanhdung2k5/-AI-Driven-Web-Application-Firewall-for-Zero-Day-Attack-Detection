@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, BackgroundTasks, WebSocket, WebSocketDisconnect 
+from fastapi import FastAPI, Request, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException 
 from fastapi.responses import HTMLResponse, StreamingResponse, Response
 import uvicorn
 import httpx
@@ -317,7 +317,11 @@ def analyze_threat(payload: str, method: str, path: str) -> dict:
     # 2. Trích xuất đặc trưng Cấu trúc
     is_risky_method = 1.0 if method.upper() in ['POST', 'PUT', 'DELETE', 'PATCH'] else 0.0
     path_length = float(len(path))
-    sensitive_keywords = ['_next', 'api', 'env', 'config', 'admin', 'setup', 'xml', 'json']
+    sensitive_keywords = [
+    'env', 'config', 'admin', 'setup', 'xml', 'json', 
+    'credentials', 'gcp', 'google', 'firebase', 'secret', 
+    'key', 'npmrc', 'account', 'auth', 'token'
+]
     has_sensitive_keyword = 1.0 if any(w in path.lower() for w in sensitive_keywords) else 0.0
     
     # 3. Chuẩn bị Input cho Random Forest (TF-IDF 5000 chiều + 3 Cấu trúc)
@@ -419,9 +423,6 @@ async def log_request_to_db(client_ip: str, method: str, path: str, http_version
 # ==========================================
 # SCHEMAS CHO WEBACL RULES (Gom chung lên đầu)
 # ==========================================
-class RuleToggle(BaseModel):
-    enabled: bool
-
 class RuleCreate(BaseModel):
     category: str
     name: str
@@ -434,6 +435,20 @@ class RuleCreate(BaseModel):
     access_count: int
     action: str
     challenge_min: int
+
+# THÊM SCHEMA MỚI: Tất cả các trường đều là Tùy chọn (Optional)
+class RuleUpdate(BaseModel):
+    category: Optional[str] = None
+    name: Optional[str] = None
+    desc: Optional[str] = None
+    enabled: Optional[bool] = None
+    match_target: Optional[str] = None
+    operator: Optional[str] = None
+    content: Optional[str] = None
+    duration_sec: Optional[int] = None
+    access_count: Optional[int] = None
+    action: Optional[str] = None
+    challenge_min: Optional[int] = None
 
 # ==========================================
 # MODULE 6: API CHO FRONTEND
@@ -611,6 +626,11 @@ async def get_webacl_rules():
 # --- API 3: TẠO RULE MỚI (Đã đổi thành POST) ---
 @app.post("/api/waf/rules")
 async def create_rule(rule: RuleCreate):
+    # KHIÊN BẢO VỆ: Quét xem tên Rule này đã tồn tại trong MongoDB chưa
+    existing_rule = await app.mongodb["webacl_rules"].find_one({"name": rule.name})
+    if existing_rule:
+        # Nếu trùng tên, đẩy ngay mã lỗi 400 về cho Frontend hiện cảnh báo
+        raise HTTPException(status_code=400, detail="A rule with this name already exists!")
     new_rule = rule.dict()
     new_rule["rule_id"] = int(time.time() * 1000) 
     
@@ -618,14 +638,22 @@ async def create_rule(rule: RuleCreate):
     return {"status": "success", "message": "Rule created successfully", "rule_id": new_rule["rule_id"]}
 
 
-# --- API 4: CẬP NHẬT TRẠNG THÁI BẬT/TẮT RULES ---
+# --- API 4: CẬP NHẬT RULES (HỖ TRỢ CẢ TOGGLE VÀ EDIT) ---
 @app.put("/api/waf/rules/{rule_id}")
-async def toggle_rule(rule_id: int, payload: RuleToggle):
+async def update_rule(rule_id: int, payload: RuleUpdate):
+    # Lệnh exclude_unset=True rất quan trọng: 
+    # Nó chỉ lấy ra những trường mà Frontend THỰC SỰ gửi lên để update, 
+    # bỏ qua các trường mang giá trị None
+    update_data = payload.dict(exclude_unset=True)
+    
+    if not update_data:
+        return {"status": "error", "message": "No data to update"}
+
     await app.mongodb["webacl_rules"].update_one(
         {"rule_id": rule_id}, 
-        {"$set": {"enabled": payload.enabled}}
+        {"$set": update_data}
     )
-    return {"status": "success", "message": f"Rule {rule_id} updated to {payload.enabled}"}
+    return {"status": "success", "message": f"Rule {rule_id} updated successfully!"}
 
 # --- API 5: XÓA RULES ---
 @app.delete("/api/waf/rules/{rule_id}")

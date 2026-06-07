@@ -42,7 +42,11 @@ is_risky_method = df['Method'].isin(['POST', 'PUT', 'DELETE', 'PATCH']).astype(f
 path_length = df['Path'].apply(len).astype(float).values.reshape(-1, 1)
 
 # Đặc trưng 3: Có chứa các từ khóa nhạy cảm của framework / hệ thống hay không?
-sensitive_keywords = ['_next', 'api', 'env', 'config', 'admin', 'setup', 'xml', 'json']
+sensitive_keywords = [
+    'env', 'config', 'admin', 'setup', 'xml', 'json', 
+    'credentials', 'gcp', 'google', 'firebase', 'secret', 
+    'key', 'npmrc', 'account', 'auth', 'token'
+]
 has_sensitive_keyword = df['Path'].apply(
     lambda x: 1.0 if any(word in str(x).lower() for word in sensitive_keywords) else 0.0
 ).values.reshape(-1, 1)
