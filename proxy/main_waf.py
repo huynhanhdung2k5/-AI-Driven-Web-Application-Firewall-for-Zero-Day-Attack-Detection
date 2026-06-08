@@ -259,7 +259,7 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 TARGET_SERVER = os.getenv("TARGET_SERVER_URL", "http://localhost:5001")
-AE_THRESHOLD = 0.003
+AE_THRESHOLD = 0.0027
 
 # ==========================================
 # MODULE 1: AI CORE & DYNAMIC BASELINE
@@ -345,7 +345,7 @@ def analyze_threat(payload: str, method: str, path: str) -> dict:
     
     if rf_score >= 50.0:
         return {"is_safe": True, "engine": "Random Forest", "score": rf_score}
-    elif rf_score <= 20.0:
+    elif rf_score < 25.0:
         return {"is_safe": False, "engine": "Random Forest", "reason": "Known Signature Detected"}
     else:
         # --- DỰ ĐOÁN VỚI AUTOENCODER (MÀNG LỌC 2) ---
