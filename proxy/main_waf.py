@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException 
 from fastapi.responses import HTMLResponse, StreamingResponse, Response
+from fastapi.concurrency import run_in_threadpool
 import uvicorn
 import httpx
 import joblib
@@ -744,7 +745,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
         ai_payload += f" {body_str}"
     
     # 3. Đưa ai_payload vào cho mô hình dự đoán
-    analysis_result = analyze_threat(ai_payload, method, path_with_query)
+    analysis_result = await run_in_threadpool(analyze_threat, ai_payload, method, path_with_query)
     print(f"[WAF] {method} {path_with_query} -> Analyze by: {analysis_result['engine']} -> Is safe: {analysis_result['is_safe']}")
     
 
