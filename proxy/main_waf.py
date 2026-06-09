@@ -346,7 +346,7 @@ def analyze_threat(payload: str, method: str, path: str) -> dict:
     
     if rf_score >= 50.0:
         return {"is_safe": True, "engine": "Random Forest", "score": rf_score}
-    elif rf_score < 25.0:
+    elif rf_score < 40.0:
         return {"is_safe": False, "engine": "Random Forest", "reason": "Known Signature Detected"}
     else:
         # --- DỰ ĐOÁN VỚI AUTOENCODER (MÀNG LỌC 2) ---
@@ -743,6 +743,7 @@ async def reverse_proxy(request: Request, path: str, bg_tasks: BackgroundTasks):
     ai_payload = f"{method} {path_with_query} {http_version}"
     if body_str:
         ai_payload += f" {body_str}"
+    
     
     # 3. Đưa ai_payload vào cho mô hình dự đoán
     analysis_result = await run_in_threadpool(analyze_threat, ai_payload, method, path_with_query)
