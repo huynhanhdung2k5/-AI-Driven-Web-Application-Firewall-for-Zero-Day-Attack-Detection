@@ -16,7 +16,7 @@ services:
   # 2. SERVER ĐÍCH BÙ NHÌN (Cái mà WAF sẽ bảo vệ)
   # ===============================================
   target_app:
-    image: nginxdemos/hello:plain-text
+    image: nginx:alpine
     container_name: waf_target_backend
     restart: always
     # TUYỆT ĐỐI KHÔNG DÙNG "ports" Ở ĐÂY. 
